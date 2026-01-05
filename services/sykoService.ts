@@ -5,11 +5,13 @@ import { Message } from '../types.ts';
 // ============================================================================
 
 const SHARED_THINKING_PROTOCOL = `
-    IMPORTANT: You are a reasoning model.
-    1. ALWAYS Output your thought process inside <think> and </think> tags first.
-    2. The <think> block must be the VERY FIRST part of your response.
-    3. Keep thoughts concise (128-1024 tokens).
-    4. Once you have the answer, close with </think> and provide the response.
+    CRITICAL INSTRUCTION:
+    1. You are a Deep Reasoning Model.
+    2. You MUST think before answering.
+    3. YOUR THOUGHT PROCESS MUST BE ENCLOSED IN <think> AND </think> TAGS.
+    4. The <think> block must come BEFORE your final answer.
+    5. DO NOT output the thought process as plain text. It MUST be tagged.
+    6. Example: <think>I need to calculate the result...</think> Here is the answer.
 `;
 
 const NATURAL_LANGUAGE_PROTOCOL = `
@@ -32,7 +34,6 @@ const SYSTEM_PROMPTS: Record<string, string> = {
     Identity: A highly intelligent, balanced AI entity.
     ${NATURAL_LANGUAGE_PROTOCOL}
     ${SHARED_THINKING_PROTOCOL}
-    Note: You must Analyze the query inside <think> tags first.
   `,
   'syko-super-pro': `
     You are SykoLLM SUPER PRO (powered by DeepSeek R1).
@@ -81,12 +82,12 @@ export const streamResponse = async (
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
     case 'syko-super-pro':
-      openRouterModel = "deepseek/deepseek-r1-0528:free";
+      openRouterModel = "deepseek/deepseek-r1:free"; // Güncel model ID
       apiKey = process.env.API_KEY2 || "";
       systemPrompt = SYSTEM_PROMPTS['syko-super-pro'];
       break;
     case 'syko-coder':
-      openRouterModel = "qwen/qwen3-coder:free";
+      openRouterModel = "qwen/qwen-2.5-coder-32b-instruct:free";
       apiKey = process.env.API_KEY3 || "";
       systemPrompt = SYSTEM_PROMPTS['syko-coder'];
       break;
@@ -167,13 +168,13 @@ export const streamResponse = async (
           
           if (!delta) continue;
 
-          // 1. Düşünce Akışı (Reasoning)
-          // DeepSeek R1 gibi modeller 'reasoning' alanını kullanır.
+          // 1. Düşünce Akışı (Reasoning Field)
+          // OpenRouter DeepSeek R1 gibi modeller bazen buraya yazar.
           const reasoningChunk = delta.reasoning; 
           
           if (reasoningChunk) {
             if (!hasStartedThinking) {
-               // İlk kez düşünce geldi, etiketi aç
+               // API'den reasoning kanalı geliyorsa biz elle etiket ekliyoruz
                onChunk("<think>");
                fullText += "<think>";
                hasStartedThinking = true;
@@ -183,16 +184,20 @@ export const streamResponse = async (
             continue; 
           }
 
-          // 2. Normal İçerik (Content)
+          // 2. Normal İçerik (Content Field)
           const contentChunk = delta.content || "";
           
           if (contentChunk) {
-            // Eğer daha önce düşünüyorduk ama şimdi content geldi ve henüz etiketi kapatmadıysak:
+            // Eğer API reasoning kanalını kullandıysa ve şimdi content'e geçtiyse etiketi kapat
             if (hasStartedThinking && !hasFinishedThinking) {
                 onChunk("</think>");
                 fullText += "</think>";
                 hasFinishedThinking = true;
             }
+
+            // Eğer API reasoning kanalı YERİNE content içinde <think> gönderiyorsa (Bazı modeller böyle yapar)
+            // Bu durumda parser'ın kafası karışmasın, direkt akıtalım.
+            // Arka plandaki ChatMessage bileşeni zaten <think> tagini görünce parse edecek.
             
             onChunk(contentChunk);
             fullText += contentChunk;
@@ -202,7 +207,7 @@ export const streamResponse = async (
       }
     }
     
-    // Döngü bittiğinde hala düşünce açıksa kapat
+    // Döngü bittiğinde hala düşünce açıksa kapat (Güvenlik önlemi)
     if (hasStartedThinking && !hasFinishedThinking) {
         onChunk("</think>");
         fullText += "</think>";

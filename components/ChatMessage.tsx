@@ -11,15 +11,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const isUser = message.role === 'user';
   const [isExpanded, setIsExpanded] = useState(true); 
   
-  // Düşünce bittiğinde (yani tag kapandığında), kutuyu otomatik kapatmak yerine
-  // kullanıcı deneyimi için açık bırakabiliriz veya kapatabiliriz.
-  // Ancak streaming sırasında açık olması önemlidir.
-  // Effect ile sadece içerik değiştiğinde kontrol yapıyoruz.
-  useEffect(() => {
-     // İsteğe bağlı: Düşünce bittiğinde otomatik kapatmak isterseniz burayı açabilirsiniz.
-     // Şimdilik "Thinking..." yazısı gidip "Thought Process"e dönüştüğü için açık kalması görsel olarak hoş.
-  }, [message.content]);
-
   // Parsing Logic
   const parseContent = (rawContent: string) => {
     let thought = "";
@@ -52,6 +43,13 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   };
 
   const { hasThought, thought, content, isThinking } = parseContent(message.content);
+
+  // Streaming sırasında düşünce varsa kutuyu otomatik açık tut
+  useEffect(() => {
+    if (isThinking) {
+        setIsExpanded(true);
+    }
+  }, [isThinking]);
 
   // Eğer kullanıcı mesajıysa direkt render et
   if (isUser) {
