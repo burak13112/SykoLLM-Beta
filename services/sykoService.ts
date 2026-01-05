@@ -4,42 +4,28 @@ import { Message } from '../types.ts';
 // 🧠 SYKO PERSONA AYARLARI
 // ============================================================================
 
-const SHARED_THINKING_PROTOCOL = `
-    INSTRUCTIONS FOR REASONING:
-    1. You are a Deep Reasoning Engine.
-    2. BEFORE answering, you MUST start with a <think> block.
-    3. Inside <think>, write out your step-by-step logic, analysis, and planning.
-    4. Close the tag with </think> and THEN provide the final response.
-    5. THIS IS MANDATORY. NO EXCEPTIONS.
-`;
-
-const NATURAL_LANGUAGE_PROTOCOL = `
-    🗣️ TONE & STYLE:
-    - Be cool, direct, and concise.
-    - No robotic intros like "Here is the answer".
+// Sadece 'Zorlama Düşünme' gerektiren modeller için (V3 Pro, Coder)
+const SYNTHETIC_THINKING_PROMPT = `
+[IMPORTANT INSTRUCTION]
+You are a Deep Reasoning AI.
+Before answering, you MUST start a structured thought process block.
+1. Start with <think>.
+2. Break down the user's request logically.
+3. Plan your response step-by-step.
+4. End with </think>.
+5. Finally, provide the answer.
+DO NOT put conversational filler inside the think block. Only logic.
 `;
 
 const SYSTEM_PROMPTS: Record<string, string> = {
-  'syko-v2.5': `
-    You are SykoLLM V2.5. Helpful, fast, witty.
-    ${NATURAL_LANGUAGE_PROTOCOL}
-  `,
-  'syko-v3-pro': `
-    You are SykoLLM PRO. Intelligent and balanced.
-    ${SHARED_THINKING_PROTOCOL}
-    ${NATURAL_LANGUAGE_PROTOCOL}
-  `,
-  'syko-super-pro': `
-    You are SykoLLM SUPER PRO. The most advanced reasoning model.
-    ${SHARED_THINKING_PROTOCOL}
-    ${NATURAL_LANGUAGE_PROTOCOL}
-  `,
-  'syko-coder': `
-    You are SykoLLM Coder. Expert software engineer.
-    ${SHARED_THINKING_PROTOCOL}
-    ${NATURAL_LANGUAGE_PROTOCOL}
-    Plan code architecture inside <think> first.
-  `
+  'syko-v2.5': `You are SykoLLM V2.5. Helpful, fast, witty companion. Speak naturally.`,
+  
+  'syko-v3-pro': `You are SykoLLM PRO. Intelligent and balanced. ${SYNTHETIC_THINKING_PROMPT}`,
+  
+  // DeepSeek R1 için System Prompt sade olmalı, model zaten ne yapacağını biliyor.
+  'syko-super-pro': `You are SykoLLM SUPER PRO (DeepSeek R1). You are a deep reasoning engine. Output your thought process naturally.`,
+  
+  'syko-coder': `You are SykoLLM Coder. Expert developer. ${SYNTHETIC_THINKING_PROMPT}`
 };
 
 export const generateSykoImage = async (modelId: string, prompt: string, referenceImages?: string[]): Promise<{ text: string, images: string[] }> => {
@@ -62,7 +48,6 @@ export const streamResponse = async (
   let apiKey = "";
   let systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
 
-  // Model ID ve Key eşleştirmeleri
   switch (modelId) {
     case 'syko-v2.5':
       openRouterModel = "meta-llama/llama-3.3-70b-instruct:free";
@@ -70,11 +55,12 @@ export const streamResponse = async (
       systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
       break;
     case 'syko-v3-pro':
-      openRouterModel = "xiaomi/mimo-v2-flash:free"; // Veya alternatif akıllı model
+      openRouterModel = "xiaomi/mimo-v2-flash:free"; 
       apiKey = process.env.API_KEY1 || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
     case 'syko-super-pro':
+      // DeepSeek R1 native reasoning kullanır
       openRouterModel = "deepseek/deepseek-r1:free"; 
       apiKey = process.env.API_KEY2 || "";
       systemPrompt = SYSTEM_PROMPTS['syko-super-pro'];
@@ -92,17 +78,17 @@ export const streamResponse = async (
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // 💉 FEW-SHOT INJECTION:
-  // Eğer model düşünen model ise (V2.5 hariç), ona sahte bir geçmiş veriyoruz.
-  // Bu sayede model "aa ben böyle konuşuyormuşum" diyip taklit ediyor.
-  if (modelId !== 'syko-v2.5') {
+  // 💉 FEW-SHOT INJECTION SADECE ZORLAMA MODELLER İÇİN
+  // DeepSeek R1 (Super Pro) için bunu yapmıyoruz, kafası karışıyor.
+  // Sadece V3 Pro ve Coder gibi "sonradan akıllanan" modellere örnek veriyoruz.
+  if (modelId === 'syko-v3-pro' || modelId === 'syko-coder') {
       messages.push({ 
           role: "user", 
-          content: "What is 2+2?" 
+          content: "Hello" 
       });
       messages.push({ 
           role: "assistant", 
-          content: "<think>\nThe user is asking a basic arithmetic question. I need to sum the two integers.\n1. Identify inputs: 2 and 2.\n2. Perform addition: 2 + 2 = 4.\n3. Verify result.\n</think>\nThe answer is 4." 
+          content: "<think>\nThe user is greeting me. I should respond politely and wait for their request.\n</think>\nHello! How can I help you today?" 
       });
   }
 
@@ -117,9 +103,9 @@ export const streamResponse = async (
   const lastMsg = history[history.length - 1];
   let finalUserContent = lastMsg.content;
 
-  // 💉 HARD ENFORCEMENT: Son kullanıcı mesajına da not düşüyoruz.
-  if (modelId !== 'syko-v2.5') {
-      finalUserContent += `\n\n(IMPORTANT: Start your response with <think> tag. Output your internal reasoning, then close with </think>, then give the answer.)`;
+  // Sadece zorlama gereken modellere not düşüyoruz.
+  if (modelId === 'syko-v3-pro' || modelId === 'syko-coder') {
+      finalUserContent += `\n\n(Remember: You MUST start with <think> tag and explain your logic first.)`;
   }
   
   if (images && images.length > 0) {
@@ -144,7 +130,7 @@ export const streamResponse = async (
         messages: messages,
         stream: true,
         temperature: 0.6,
-        include_reasoning: true // DeepSeek R1 için native support varsa
+        include_reasoning: true // Bu flag DeepSeek R1 için kritiktir.
       }),
       signal: signal
     });
@@ -155,9 +141,6 @@ export const streamResponse = async (
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     
-    let fullText = "";
-    let buffer = "";
-    
     // Reasoning State Management
     let hasStartedThinking = false;
     let hasFinishedThinking = false;
@@ -166,9 +149,8 @@ export const streamResponse = async (
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+      const chunkStr = decoder.decode(value, { stream: true });
+      const lines = chunkStr.split("\n");
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -182,35 +164,29 @@ export const streamResponse = async (
           
           if (!delta) continue;
 
-          // 1. Native Reasoning (DeepSeek R1 özel alanı)
+          // 1. NATIVE REASONING (DeepSeek R1 / Super Pro)
+          // Bu kısım "include_reasoning: true" sayesinde gelir.
           const reasoningChunk = delta.reasoning; 
           
           if (reasoningChunk) {
             if (!hasStartedThinking) {
                onChunk("<think>");
-               fullText += "<think>";
                hasStartedThinking = true;
             }
             onChunk(reasoningChunk);
-            fullText += reasoningChunk;
             continue; 
           }
 
-          // 2. Normal Content
+          // 2. NORMAL CONTENT
           const contentChunk = delta.content || "";
           
           if (contentChunk) {
+            // Eğer reasoning kanalından geliyorduysa ve bittiyse kapat
             if (hasStartedThinking && !hasFinishedThinking) {
                 onChunk("</think>");
-                fullText += "</think>";
                 hasFinishedThinking = true;
             }
-            
-            // Eğer model native reasoning KULLANMIYOR ama bizim zorlamamızla
-            // text'in içine <think> yazıyorsa, onu olduğu gibi basıyoruz.
-            // Frontend'deki ChatMessage bileşeni bunu parse edecek.
             onChunk(contentChunk);
-            fullText += contentChunk;
           }
 
         } catch (e) { }
@@ -219,10 +195,9 @@ export const streamResponse = async (
     
     if (hasStartedThinking && !hasFinishedThinking) {
         onChunk("</think>");
-        fullText += "</think>";
     }
 
-    return fullText;
+    return "DONE";
 
   } catch (error: any) {
     if (error.name === 'AbortError') return "[ABORTED]";

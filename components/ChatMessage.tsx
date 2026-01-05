@@ -96,13 +96,13 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             <div className="mb-6 mt-2">
               <button 
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest opacity-70 hover:opacity-100 transition-opacity select-none group w-full"
+                className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest opacity-80 hover:opacity-100 transition-opacity select-none group w-full"
               >
-                <div className="flex items-center gap-2 text-indigo-500 dark:text-indigo-400">
+                <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
                    {isExpanded ? <Icons.ChevronDown size={14} /> : <Icons.ChevronRight size={14} />}
                    <Icons.Brain size={14} className={isThinking ? "animate-pulse" : ""} />
                 </div>
-                <span className={`font-bold ${isThinking ? "animate-pulse text-indigo-500 dark:text-indigo-400" : "text-gray-500 dark:text-gray-400"}`}>
+                <span className={`font-bold ${isThinking ? "animate-pulse text-indigo-600 dark:text-indigo-400" : "text-gray-600 dark:text-gray-300"}`}>
                   {isThinking ? "GENERATING THOUGHT PROCESS..." : "THOUGHT PROCESS"}
                 </span>
                 {!isThinking && <div className="h-px bg-black/10 dark:bg-white/10 flex-1 ml-2"></div>}
@@ -110,7 +110,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               
               {(isExpanded || isThinking) && (
                 <div className="mt-2 pl-4 ml-1.5 border-l-2 border-indigo-500/20 dark:border-indigo-500/30 animate-fade-in">
-                  <div className="text-xs md:text-sm font-mono text-gray-600 dark:text-gray-400 leading-relaxed opacity-90 break-words whitespace-pre-wrap bg-black/5 dark:bg-black/20 p-4 rounded-r-lg rounded-bl-lg">
+                  <div className="text-xs md:text-sm font-mono text-gray-800 dark:text-gray-300 leading-relaxed break-words whitespace-pre-wrap bg-indigo-50/50 dark:bg-indigo-900/10 p-4 rounded-r-lg rounded-bl-lg border border-indigo-100 dark:border-indigo-500/10">
                     {thought || <span className="opacity-50 animate-pulse">Initializing logic cores...</span>}
                     {isThinking && <span className="inline-block w-2 h-4 bg-indigo-500 ml-1 animate-pulse align-middle"></span>}
                   </div>
