@@ -55,7 +55,7 @@ export const streamResponse = async (
       systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
       break;
     case 'syko-v3-pro':
-      openRouterModel = "xiaomi/mimo-v2-flash:free"; 
+      openRouterModel = "mistralai/devstral-2512:free"; 
       apiKey = process.env.API_KEY1 || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
