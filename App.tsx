@@ -264,6 +264,9 @@ export default function App() {
 
   // --- 🚦 LIMIT CONTROLLER ---
   const checkLimits = (action: 'text' | 'imageGen' | 'vision'): boolean => {
+    // 🔓 ADMIN GOD MODE: Eğer Geliştirici ise limit yok.
+    if (user?.email === "admin@sykollm.dev") return true;
+
     const today = new Date().toISOString().split('T')[0];
     if (usage.date !== today) {
       setUsage({ ...DEFAULT_USAGE, date: today });
@@ -297,6 +300,9 @@ export default function App() {
   };
 
   const consumeLimit = (action: 'text' | 'imageGen' | 'vision') => {
+    // 🔓 ADMIN GHOST MODE: Geliştirici kotadan yemez.
+    if (user?.email === "admin@sykollm.dev") return;
+
     const today = new Date().toISOString().split('T')[0];
     let newUsage = { ...usage };
 
