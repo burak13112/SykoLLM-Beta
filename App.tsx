@@ -49,6 +49,7 @@ const MODELS: ModelConfig[] = [
 
 // 🔒 GÜVENLİK AYARLARI
 const ALLOWED_ADMIN_IP = "78.163.111.69";
+const ADMIN_EMAIL = "admin@sykollm.dev";
 
 // 💰 EKONOMİ VE LİMİT AYARLARI
 const LIMITS = {
@@ -159,11 +160,12 @@ export default function App() {
   const handleGoogleLogin = (response: any) => { 
     try { 
       const payload = JSON.parse(atob(response.credential.split('.')[1])); 
-      setUser({ name: payload.name, email: payload.email, picture: payload.picture }); 
+      const googleUser = { name: payload.name, email: payload.email, picture: payload.picture };
+      setUser(googleUser); 
+      localStorage.setItem('syko_active_user', JSON.stringify(googleUser));
       startVerificationSequence(); 
     } catch (e) { 
-      setUser({ name: "Demo User", email: "user@sykollm.com", picture: "https://lh3.googleusercontent.com/a/default-user" }); 
-      startVerificationSequence(); 
+      // Fallback
     } 
   };
 
@@ -172,6 +174,12 @@ export default function App() {
     // Check Privacy Consent
     const consent = localStorage.getItem('syko_privacy_consent');
     if (consent === 'true') setPrivacyAccepted(true);
+
+    // Load Active User (Persistence)
+    const storedActiveUser = localStorage.getItem('syko_active_user');
+    if (storedActiveUser) {
+        setUser(JSON.parse(storedActiveUser));
+    }
 
     // Load Wallet & Usage
     const storedWallet = localStorage.getItem('syko_wallet');
@@ -265,7 +273,7 @@ export default function App() {
   // --- 🚦 LIMIT CONTROLLER ---
   const checkLimits = (action: 'text' | 'imageGen' | 'vision'): boolean => {
     // 🔓 ADMIN GOD MODE: Eğer Geliştirici ise limit yok.
-    if (user?.email === "admin@sykollm.dev") return true;
+    if (user?.email === ADMIN_EMAIL) return true;
 
     const today = new Date().toISOString().split('T')[0];
     if (usage.date !== today) {
@@ -301,7 +309,7 @@ export default function App() {
 
   const consumeLimit = (action: 'text' | 'imageGen' | 'vision') => {
     // 🔓 ADMIN GHOST MODE: Geliştirici kotadan yemez.
-    if (user?.email === "admin@sykollm.dev") return;
+    if (user?.email === ADMIN_EMAIL) return;
 
     const today = new Date().toISOString().split('T')[0];
     let newUsage = { ...usage };
@@ -365,16 +373,36 @@ export default function App() {
       if (storedUsers.find((u: any) => u.email === email)) { setAuthError('Account already exists.'); return; }
       const newUser = { email, password, name: fullName, picture: `https://api.dicebear.com/7.x/initials/svg?seed=${fullName}` };
       localStorage.setItem('syko_users', JSON.stringify([...storedUsers, newUser]));
-      setUser({ name: newUser.name, email: newUser.email, picture: newUser.picture }); startVerificationSequence();
+      
+      setUser({ name: newUser.name, email: newUser.email, picture: newUser.picture });
+      localStorage.setItem('syko_active_user', JSON.stringify({ name: newUser.name, email: newUser.email, picture: newUser.picture }));
+      startVerificationSequence();
     } else {
       const foundUser = storedUsers.find((u: any) => u.email === email && u.password === password);
-      if (foundUser) { setUser({ name: foundUser.name, email: foundUser.email, picture: foundUser.picture }); startVerificationSequence(); } else { setAuthError('Invalid email or password.'); }
+      if (foundUser) { 
+          const activeUser = { name: foundUser.name, email: foundUser.email, picture: foundUser.picture };
+          setUser(activeUser); 
+          localStorage.setItem('syko_active_user', JSON.stringify(activeUser));
+          startVerificationSequence(); 
+      } else { 
+          setAuthError('Invalid email or password.'); 
+      }
     }
   };
 
-  const handleDemoLogin = () => { setUser({ name: "Developer Admin", email: "admin@sykollm.dev", picture: "https://api.dicebear.com/7.x/avataaars/svg?seed=SykoAdmin" }); startVerificationSequence(); };
+  const handleDemoLogin = () => { 
+      const adminUser = { name: "Developer Admin", email: ADMIN_EMAIL, picture: "https://api.dicebear.com/7.x/avataaars/svg?seed=SykoAdmin" };
+      setUser(adminUser);
+      localStorage.setItem('syko_active_user', JSON.stringify(adminUser));
+      startVerificationSequence(); 
+  };
+  
   const startVerificationSequence = () => { setIsVerifying(true); let step = 0; const interval = setInterval(() => { step++; setVerifyStep(step); if (step >= 4) { clearInterval(interval); setTimeout(() => setIsVerifying(false), 1000); } }, 1000); };
-  const handleLogout = () => { setUser(null); setIsVerifying(false); setVerifyStep(0); setEmail(''); setPassword(''); setFullName(''); setAuthError(''); };
+  
+  const handleLogout = () => { 
+      localStorage.removeItem('syko_active_user');
+      setUser(null); setIsVerifying(false); setVerifyStep(0); setEmail(''); setPassword(''); setFullName(''); setAuthError(''); 
+  };
   const toggleVoiceInput = () => { if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return; } const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SpeechRecognition) return alert("Desteklenmiyor."); const rec = new SpeechRecognition(); rec.lang = 'tr-TR'; rec.onstart = () => setIsListening(true); rec.onend = () => setIsListening(false); rec.onresult = (e: any) => setInput(Array.from(e.results).map((r: any) => r[0].transcript).join('')); recognitionRef.current = rec; rec.start(); };
   const toggleTheme = () => { const newTheme = theme === Theme.DARK ? Theme.LIGHT : Theme.DARK; setTheme(newTheme); document.documentElement.className = newTheme; localStorage.setItem('syko-theme', newTheme); };
 
@@ -712,15 +740,29 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <div className="mt-8 text-xs text-gray-400">
-                  <p className="mb-1 text-center font-bold opacity-70">Daily Limit Status</p>
-                  <div className="flex flex-wrap justify-center gap-4 md:gap-6 text-[10px]">
-                      <div>V2.5: {LIMITS.v25.text - usage.v25.text} Left</div>
-                      <div>PRO: {LIMITS.pro.text - usage.pro.text} Left</div>
-                      <div>SUPER: {LIMITS.super.text - usage.super.text} Left</div>
-                      <div>CODER: {LIMITS.coder.text - usage.coder.text} Left</div>
+              
+              {/* --- GÜNCELLENEN ALAN: GOD MODE GÖSTERGESİ --- */}
+              {user?.email === ADMIN_EMAIL ? (
+                  <div className="mt-8 w-full max-w-md mx-auto animate-fade-in">
+                     <div className="w-full text-center py-3 bg-green-500/10 border border-green-500/20 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.1)]">
+                         <p className="text-green-500 font-black tracking-widest text-xs animate-pulse flex items-center justify-center gap-2">
+                            <Icons.Terminal size={14} /> DEVELOPER GOD MODE ACTIVE
+                         </p>
+                         <p className="text-[10px] text-green-500/60 uppercase mt-1 font-mono">Unlimited Tokens & Usage Bypass</p>
+                     </div>
                   </div>
-              </div>
+              ) : (
+                  <div className="mt-8 text-xs text-gray-400">
+                      <p className="mb-1 text-center font-bold opacity-70">Daily Limit Status</p>
+                      <div className="flex flex-wrap justify-center gap-4 md:gap-6 text-[10px]">
+                          <div>V2.5: {LIMITS.v25.text - usage.v25.text} Left</div>
+                          <div>PRO: {LIMITS.pro.text - usage.pro.text} Left</div>
+                          <div>SUPER: {LIMITS.super.text - usage.super.text} Left</div>
+                          <div>CODER: {LIMITS.coder.text - usage.coder.text} Left</div>
+                      </div>
+                  </div>
+              )}
+
             </div>
           ) : (
             <div className="flex flex-col min-h-full">
