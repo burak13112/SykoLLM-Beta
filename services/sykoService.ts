@@ -37,42 +37,52 @@ const extractBase64Data = (dataUrl: string) => {
 // ============================================================================
 export const generateSykoImage = async (modelId: string, prompt: string, referenceImages?: string[]): Promise<{ text: string, images: string[] }> => {
   
-  // UX Gecikmesi
-  await new Promise(resolve => setTimeout(resolve, 500));
-
   // 🔑 GEMINI API KEY (Google AI Studio)
-  const geminiKey = process.env.API_KEY4 || ""; 
+  const rawKey = process.env.API_KEY4 || ""; 
+  const geminiKey = rawKey.trim(); // Boşlukları temizle
   
   if (!geminiKey) {
       throw new Error("API_KEY4 eksik! Görsel üretimi için Google AI Studio anahtarı gerekli.");
   }
 
-  // KULLANICININ İSTEDİĞİ MODEL
+  // KULLANICININ İSTEDİĞİ NET MODEL
   const targetModel = "gemini-2.5-flash-image";
 
+  console.log(`[SykoLLM Vision] Model: ${targetModel} ile üretim başlatılıyor...`);
+
   try {
-      // Gemini Görsel Üretim Endpoint'i (generateContent kullanılır)
+      // Gemini Görsel Üretim Endpoint'i
+      // Not: Bu model generateContent kullanır ama nano serisi olduğu için parametreler hassastır.
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json"
+            // CORS hatasını önlemek için gereksiz header eklemiyoruz
+          },
           body: JSON.stringify({
               contents: [{
                   parts: [{ text: prompt }]
               }]
+              // Config eklemiyoruz, nano modellerde responseMimeType desteklenmez.
           })
       });
 
       if (!response.ok) {
+          const status = response.status;
           const errText = await response.text();
-          console.error("Gemini Image Gen API Error:", errText);
+          console.error(`Gemini API Error (${status}):`, errText);
           
-          if (response.status === 404) {
-             throw new Error(`Model Bulunamadı (404): ${targetModel}. İsim hatalı veya Google bu modeli kaldırmış.`);
+          if (status === 404) {
+             throw new Error(`Model Bulunamadı (404): '${targetModel}'. Google bu modeli henüz hesabınız için aktif etmemiş olabilir.`);
           }
-          if (response.status === 429) {
-             throw new Error("Google API Kotası Doldu (429). Model şu an aşırı yoğun.");
+          if (status === 429) {
+             // Rate limit mesajını netleştir
+             throw new Error("Google Kotası Doldu (429). Lütfen 1-2 dakika bekleyip tekrar deneyin.");
           }
-          throw new Error(`API Hatası (${response.status}): ${response.statusText}`);
+          if (status === 400) {
+              throw new Error("İstek Hatası (400): API Anahtarı veya Prompt formatı geçersiz.");
+          }
+          throw new Error(`API Hatası (${status}): ${response.statusText}`);
       }
 
       const data = await response.json();
@@ -80,7 +90,7 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
       const images: string[] = [];
       let textOutput = "";
       
-      // Inline Data (Base64) kontrolü
+      // Inline Data (Base64) kontrolü - Görseli buradan alıyoruz
       for (const part of parts) {
           if (part.inline_data) {
              images.push(`data:${part.inline_data.mime_type};base64,${part.inline_data.data}`);
@@ -96,31 +106,34 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
           };
       } else {
           // Eğer image yoksa safety filter'a takılmış olabilir
-          throw new Error("Model cevap verdi ama görsel içermiyor. Prompt'unuz güvenlik filtresine takılmış olabilir.");
+          console.warn("Safety Filter Tetiklenmiş Olabilir:", data);
+          throw new Error("Görsel üretilemedi. Prompt 'Güvenlik Filtresi'ne takılmış olabilir veya model şu an görsel üretemiyor.");
       }
 
   } catch (error: any) {
-      console.error("Görsel Üretim Hatası:", error);
+      console.error("Görsel Üretim Kritik Hata:", error);
+      
+      // Failed to fetch hatasını yakala ve açıkla
       if (error.name === "TypeError" && error.message === "Failed to fetch") {
-          throw new Error("Bağlantı Hatası: API'ye ulaşılamadı. Ağınızı kontrol edin.");
+          throw new Error("Bağlantı Hatası: 'Failed to fetch'. Bu genellikle Ağ Problemi, AdBlocker veya CORS kaynaklıdır. Lütfen sayfayı yenileyip tekrar deneyin.");
       }
       throw error;
   }
 };
 
 // ============================================================================
-// 👁️ VISION BRIDGE (Doğrudan Google Gemini API)
+// 👁️ VISION BRIDGE (Görsel Analiz - Gemini 1.5 Flash)
 // ============================================================================
 const getVisionDescription = async (imageUrl: string): Promise<string> => {
     try {
-        // 🔑 GEMINI API KEY (Google AI Studio)
-        const geminiKey = process.env.API_KEY4 || "";
+        const rawKey = process.env.API_KEY4 || "";
+        const geminiKey = rawKey.trim();
         
         if (!geminiKey) return "Vision API Key (API_KEY4) is missing.";
 
         const { mimeType, data } = extractBase64Data(imageUrl);
 
-        // Vision analiz için Gemini 1.5 Flash kullanımı (En stabil vision modeli)
+        // Vision analiz için Gemini 1.5 Flash (Stabil olan bu)
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
