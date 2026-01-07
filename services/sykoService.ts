@@ -130,7 +130,7 @@ export const streamResponse = async (
       // DÜZELTME: Xiaomi modeli 404 verdiği için aynı segmentte
       // ama çok daha stabil ve güçlü olan Google Gemini 2.0 Flash Lite'a geçiş yapıldı.
       // Kullanıcı deneyimi değişmez, sadece hata giderilir.
-      openRouterModel = "google/gemini-2.0-flash-lite-preview-02-05:free";
+      openRouterModel = "google/gemini-2.0-flash-exp:free";
       apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
@@ -151,13 +151,25 @@ export const streamResponse = async (
       openRouterModel = "meta-llama/llama-3.3-70b-instruct:free";
       apiKey = process.env.API_KEY || "";
   }
+  
+  // 🚨 VISION FALLBACK (VISION SWAP)
+  // Eğer kullanıcı resim yüklediyse ve seçili model resim desteklemiyorsa (Llama, DeepSeek, Qwen),
+  // otomatik olarak Gemini modeline geçiş yap ki 400 hatası almasın.
+  if (images && images.length > 0) {
+      if (modelId === 'syko-v2.5' || modelId === 'syko-super-pro' || modelId === 'syko-coder') {
+          console.log(`[SykoLLM System] Vision swap triggered for ${modelId}. Switching to Gemini backend for image analysis.`);
+          openRouterModel = "google/gemini-2.0-flash-lite-preview-02-05:free";
+          // Yedek anahtarlar varsa onları kullan, yoksa ana anahtarı kullan
+          apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+      }
+  }
 
   if (!apiKey) throw new Error(`API Anahtarı eksik! (${modelId}). Lütfen .env dosyasını kontrol et.`);
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
 
   // 💉 FEW-SHOT INJECTION (Sadece Coder için, Gemini ve DeepSeek gerek duymaz)
-  if (modelId === 'syko-coder') {
+  if (modelId === 'syko-coder' && (!images || images.length === 0)) {
       messages.push({ 
           role: "user", 
           content: "Hello" 
@@ -180,7 +192,7 @@ export const streamResponse = async (
   let finalUserContent = lastMsg.content;
 
   // Sadece zorlama gereken modellere not düşüyoruz (Gemini Flash Lite ve DeepSeek genelde buna ihtiyaç duymaz ama Coder için iyi)
-  if (modelId === 'syko-coder') {
+  if (modelId === 'syko-coder' && (!images || images.length === 0)) {
       finalUserContent += `\n\n(Remember: You MUST start with <think> tag and explain your logic first.)`;
   }
   
@@ -217,6 +229,9 @@ export const streamResponse = async (
         // Hata mesajını daha anlaşılır kıl
         if (response.status === 404) {
             throw new Error("Model servisine ulaşılamadı (404). Model bakımdadır, lütfen daha sonra tekrar deneyin veya başka model seçin.");
+        }
+        if (response.status === 400 && errorData.includes("image")) {
+             throw new Error("Bu görsel işlenemedi. Lütfen görseli kaldırıp tekrar deneyin veya sayfayı yenileyin.");
         }
         throw new Error(`API Error: ${response.status} - ${response.statusText}`);
     }

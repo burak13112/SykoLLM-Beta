@@ -22,7 +22,7 @@ const MODELS: ModelConfig[] = [
     name: 'SykoLLM V2.5', 
     tag: 'FAST', 
     description: 'Our fast model, optimized for everyday tasks and quick responses.', 
-    supportsImages: false 
+    supportsImages: true // ARTIK HEPSİ GÖRSEL DESTEKLİYOR (Auto-Swap ile)
   },
   { 
     id: 'syko-v3-pro', 
@@ -36,21 +36,21 @@ const MODELS: ModelConfig[] = [
     name: 'SykoLLM SUPER PRO', 
     tag: 'O1-PREVIEW', 
     description: 'Our most advanced reasoning model. Thinks deeply before answering complex queries.', 
-    supportsImages: false 
+    supportsImages: true // ARTIK HEPSİ GÖRSEL DESTEKLİYOR
   },
   { 
     id: 'syko-coder', 
     name: 'SykoLLM Coder', 
     tag: 'DEV', 
     description: 'Specialized for programming tasks, debugging, and code generation.', 
-    supportsImages: false 
+    supportsImages: true // ARTIK HEPSİ GÖRSEL DESTEKLİYOR
   },
   {
     id: 'syko-vision',
     name: 'SykoLLM VISION',
     tag: 'CREATOR',
     description: 'Our advanced visual generation engine. Transforms text prompts into high-fidelity visual assets.',
-    supportsImages: false // Bu model görsel ÜRETİR, görsel okumaz.
+    supportsImages: true // Remix için gerekli
   }
 ];
 
