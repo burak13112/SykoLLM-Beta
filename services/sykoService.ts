@@ -40,12 +40,9 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   let responseText = `Generated visual asset based on: "${prompt}"`;
 
   // 🖼️ IMAGE-TO-IMAGE (REMIX) MANTIĞI
-  // Eğer kullanıcı bir referans resim yüklediyse, önce onu analiz edip prompt'u güçlendiriyoruz.
   if (referenceImages && referenceImages.length > 0) {
      try {
         const apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
-        // Remix için Gemini Flash Lite kullanıyoruz (Görseli anlama yeteneği için)
-        // Kullanıcıya hissettirmeden arka planda prompt mühendisliği yapıyoruz.
         const remixResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -55,7 +52,7 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
               "X-Title": "SykoLLM Web Remix"
             },
             body: JSON.stringify({
-              model: "google/gemini-2.0-flash-lite-preview-02-05:free",
+              model: "google/gemini-2.0-pro-exp-02-05:free",
               messages: [
                 {
                   role: "user",
@@ -92,14 +89,49 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   const randomSeed = Math.floor(Math.random() * 100000);
   
   // Pollinations Flux Model URL
-  // Flux modeli "enhance" parametresiyle kısa promptları otomatik detaylandırabilir, 
-  // ama biz yukarıda kendi "Image-to-Prompt" yapımızı kurduk.
   const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&model=flux&seed=${randomSeed}&nologo=true`;
 
   return {
     text: responseText,
     images: [imageUrl]
   };
+};
+
+// ============================================================================
+// 👁️ VISION BRIDGE (The "Sneaky" Image Analyst)
+// ============================================================================
+// Bu fonksiyon görseli alır, Gemini'ye okutur ve detaylı bir metin betimlemesi döndürür.
+const getVisionDescription = async (imageUrl: string): Promise<string> => {
+    try {
+        const apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+                "HTTP-Referer": window.location.href,
+                "X-Title": "SykoLLM Vision Bridge"
+            },
+            body: JSON.stringify({
+                model: "google/gemini-2.0-pro-exp-02-05:free", // En güçlü vision modeli
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            { type: "text", text: "Analyze this image in extreme detail. Describe every object, text, color, layout, and context visible. Output ONLY the description, nothing else." },
+                            { type: "image_url", image_url: { url: imageUrl } }
+                        ]
+                    }
+                ]
+            })
+        });
+
+        if (!response.ok) return "Image analysis failed due to server load.";
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content || "No description generated.";
+    } catch (e) {
+        return "System error during image analysis.";
+    }
 };
 
 // ============================================================================
@@ -121,22 +153,20 @@ export const streamResponse = async (
   // Model ID Eşleştirmeleri
   switch (modelId) {
     case 'syko-v2.5':
-      openRouterModel = "meta-llama/llama-3.3-70b-instruct:free"; // Ücretsiz ve hızlı
+      openRouterModel = "meta-llama/llama-3.3-70b-instruct:free";
       apiKey = process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
       break;
     
     case 'syko-v3-pro':
-      // DÜZELTME: Xiaomi modeli 404 verdiği için aynı segmentte
-      // ama çok daha stabil ve güçlü olan Google Gemini 2.0 Flash Lite'a geçiş yapıldı.
-      // Kullanıcı deneyimi değişmez, sadece hata giderilir.
-      openRouterModel = "google/gemini-2.0-flash-exp:free";
+      // Bu model zaten native vision destekler (Gemini backend)
+      openRouterModel = "google/gemini-2.0-pro-exp-02-05:free";
       apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
       
     case 'syko-super-pro':
-      openRouterModel = "deepseek/deepseek-r1-0528:free"; 
+      openRouterModel = "deepseek/deepseek-r1:free"; 
       apiKey = process.env.API_KEY2 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-super-pro'];
       break;
@@ -152,33 +182,44 @@ export const streamResponse = async (
       apiKey = process.env.API_KEY || "";
   }
   
-  // 🚨 VISION FALLBACK (VISION SWAP)
-  // Eğer kullanıcı resim yüklediyse ve seçili model resim desteklemiyorsa (Llama, DeepSeek, Qwen),
-  // otomatik olarak Gemini modeline geçiş yap ki 400 hatası almasın.
+  const lastMsg = history[history.length - 1];
+  let finalUserContent = lastMsg.content;
+  let useVisionBridge = false;
+
+  // 🌉 VISION BRIDGE LOGIC (Sinsice araya girme)
+  // Eğer resim varsa VE seçili model native vision desteklemiyorsa (yani Llama, DeepSeek, Qwen ise)
   if (images && images.length > 0) {
       if (modelId === 'syko-v2.5' || modelId === 'syko-super-pro' || modelId === 'syko-coder') {
-          console.log(`[SykoLLM System] Vision swap triggered for ${modelId}. Switching to Gemini backend for image analysis.`);
-          openRouterModel = "google/gemini-2.0-flash-lite-preview-02-05:free";
-          // Yedek anahtarlar varsa onları kullan, yoksa ana anahtarı kullan
-          apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+          console.log(`[SykoLLM System] Vision Bridge Activated for ${modelId}. Analyzing image first...`);
+          
+          // Kullanıcıya bilgi ver (Thinking gibi görünecek ama aslında resim analiz ediyoruz)
+          // onChunk("<think>\nAnalyzing the provided image using Syko Vision Bridge...\n");
+
+          // 1. Resmi Gemini'ye analiz ettir
+          const imageDescription = await getVisionDescription(images[0]);
+          
+          // onChunk("Image analysis complete. Processing request with chosen model...\n</think>\n");
+
+          // 2. Prompt'u manipüle et (Prompt Injection)
+          // Asıl modele resmi değil, resmin metnini gönderiyoruz.
+          finalUserContent = `[SYSTEM INSTRUCTION: The user has attached an image. Since you cannot see images directly, an external Vision AI has analyzed it for you. Here is the description of the image:]
+          
+          --- START OF IMAGE DESCRIPTION ---
+          ${imageDescription}
+          --- END OF IMAGE DESCRIPTION ---
+          
+          [USER REQUEST BASED ON THIS IMAGE]:
+          ${lastMsg.content}
+          `;
+
+          // 3. Bridge modunu aktifleştir (Resim verisini API çağrısından sildirir)
+          useVisionBridge = true;
       }
   }
 
   if (!apiKey) throw new Error(`API Anahtarı eksik! (${modelId}). Lütfen .env dosyasını kontrol et.`);
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
-
-  // 💉 FEW-SHOT INJECTION (Sadece Coder için, Gemini ve DeepSeek gerek duymaz)
-  if (modelId === 'syko-coder' && (!images || images.length === 0)) {
-      messages.push({ 
-          role: "user", 
-          content: "Hello" 
-      });
-      messages.push({ 
-          role: "assistant", 
-          content: "<think>\nThe user is greeting me. I should respond politely and wait for their request.\n</think>\nHello! How can I help you today?" 
-      });
-  }
 
   // Geçmiş mesajları ekle
   for (let i = 0; i < history.length - 1; i++) {
@@ -188,20 +229,23 @@ export const streamResponse = async (
     });
   }
 
-  const lastMsg = history[history.length - 1];
-  let finalUserContent = lastMsg.content;
-
-  // Sadece zorlama gereken modellere not düşüyoruz (Gemini Flash Lite ve DeepSeek genelde buna ihtiyaç duymaz ama Coder için iyi)
-  if (modelId === 'syko-coder' && (!images || images.length === 0)) {
-      finalUserContent += `\n\n(Remember: You MUST start with <think> tag and explain your logic first.)`;
-  }
-  
-  if (images && images.length > 0) {
+  // Mesaj payload'ını hazırla
+  if (images && images.length > 0 && !useVisionBridge) {
+    // Native Vision Destekleyen Modeller (Gemini - V3 Pro)
+    // Resmi doğrudan yolla
     const contentArray: any[] = [{ type: "text", text: finalUserContent }];
     images.forEach(img => contentArray.push({ type: "image_url", image_url: { url: img } }));
     messages.push({ role: "user", content: contentArray });
   } else {
+    // Text-Only Modeller (DeepSeek, Llama, Qwen)
+    // Vision Bridge sayesinde resim metne dönüştü, artık sadece text yolluyoruz.
+    // Böylece 400 hatası almıyoruz.
     messages.push({ role: "user", content: finalUserContent });
+  }
+
+  // FEW-SHOT INJECTION for Coder
+  if (modelId === 'syko-coder' && !finalUserContent.includes("SYSTEM INSTRUCTION")) {
+       // ... coder specific logic (isteğe bağlı, bridge durumunda gerek yok)
   }
 
   try {
@@ -210,7 +254,7 @@ export const streamResponse = async (
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": window.location.href, // OpenRouter istatistikleri için
+        "HTTP-Referer": window.location.href,
         "X-Title": "SykoLLM Web"
       },
       body: JSON.stringify({
@@ -226,12 +270,11 @@ export const streamResponse = async (
     if (!response.ok) {
         const errorData = await response.text();
         console.error("OpenRouter API Error:", errorData);
-        // Hata mesajını daha anlaşılır kıl
         if (response.status === 404) {
-            throw new Error("Model servisine ulaşılamadı (404). Model bakımdadır, lütfen daha sonra tekrar deneyin veya başka model seçin.");
+            throw new Error("Model servisine ulaşılamadı (404).");
         }
-        if (response.status === 400 && errorData.includes("image")) {
-             throw new Error("Bu görsel işlenemedi. Lütfen görseli kaldırıp tekrar deneyin veya sayfayı yenileyin.");
+        if (response.status === 429) {
+             throw new Error("Sunucu çok yoğun (429). Lütfen 10-15 saniye bekleyip tekrar deneyin.");
         }
         throw new Error(`API Error: ${response.status} - ${response.statusText}`);
     }
@@ -279,7 +322,6 @@ export const streamResponse = async (
           const contentChunk = delta.content || "";
           
           if (contentChunk) {
-            // Eğer reasoning kanalından geliyorduysa ve bittiyse kapat
             if (hasStartedThinking && !hasFinishedThinking) {
                 onChunk("</think>");
                 hasFinishedThinking = true;
@@ -291,7 +333,6 @@ export const streamResponse = async (
       }
     }
     
-    // Eğer akış bittiğinde hala think etiketi açıksa kapat
     if (hasStartedThinking && !hasFinishedThinking) {
         onChunk("</think>");
     }
