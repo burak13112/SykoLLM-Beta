@@ -136,7 +136,7 @@ export const streamResponse = async (
       break;
       
     case 'syko-super-pro':
-      openRouterModel = "deepseek/deepseek-r1:free"; 
+      openRouterModel = "deepseek/deepseek-r1-0528:free"; 
       apiKey = process.env.API_KEY2 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-super-pro'];
       break;
