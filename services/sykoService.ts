@@ -43,6 +43,8 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   if (referenceImages && referenceImages.length > 0) {
      try {
         const apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+        // REMIX için en sağlam Vision modeli olan Gemini 2.0 Pro'yu kullanıyoruz.
+        // Gemma bazen OpenRouter'da görsel ile birlikte kullanıldığında hata verip React'i çökertebiliyor.
         const remixResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -52,7 +54,7 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
               "X-Title": "SykoLLM Web Remix"
             },
             body: JSON.stringify({
-              model: "google/gemma-3-27b-it:free",
+              model: "google/gemini-2.0-pro-exp-02-05:free", 
               messages: [
                 {
                   role: "user",
@@ -78,9 +80,11 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
                 finalPrompt = enhancedPrompt;
                 responseText = `Remixed visual asset based on reference and: "${prompt}"`;
             }
+        } else {
+            console.warn("Remix API returned error:", await remixResponse.text());
         }
      } catch (e) {
-         console.warn("Remix enhancement failed, falling back to raw prompt.");
+         console.warn("Remix enhancement failed, falling back to raw prompt.", e);
      }
   }
 
@@ -160,7 +164,7 @@ export const streamResponse = async (
     
     case 'syko-v3-pro':
       // Bu model zaten native vision destekler (Gemini backend)
-      openRouterModel = "google/gemma-3-27b-it:free";
+      openRouterModel = "google/gemini-2.0-pro-exp-02-05:free";
       apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
@@ -192,14 +196,9 @@ export const streamResponse = async (
       if (modelId === 'syko-v2.5' || modelId === 'syko-super-pro' || modelId === 'syko-coder') {
           console.log(`[SykoLLM System] Vision Bridge Activated for ${modelId}. Analyzing image first...`);
           
-          // Kullanıcıya bilgi ver (Thinking gibi görünecek ama aslında resim analiz ediyoruz)
-          // onChunk("<think>\nAnalyzing the provided image using Syko Vision Bridge...\n");
-
           // 1. Resmi Gemini'ye analiz ettir
           const imageDescription = await getVisionDescription(images[0]);
           
-          // onChunk("Image analysis complete. Processing request with chosen model...\n</think>\n");
-
           // 2. Prompt'u manipüle et (Prompt Injection)
           // Asıl modele resmi değil, resmin metnini gönderiyoruz.
           finalUserContent = `[SYSTEM INSTRUCTION: The user has attached an image. Since you cannot see images directly, an external Vision AI has analyzed it for you. Here is the description of the image:]

@@ -199,17 +199,11 @@ export default function App() {
 
   // Initialize
   useEffect(() => {
-    // Load Wallet
-    const storedWallet = localStorage.getItem('syko_wallet');
-    if (storedWallet) setWallet(JSON.parse(storedWallet));
-
     const savedTheme = localStorage.getItem('syko-theme') as Theme;
     if (savedTheme) {
       setTheme(savedTheme);
       document.documentElement.className = savedTheme;
     }
-    const savedSessions = localStorage.getItem('syko-sessions');
-    if (savedSessions) setSessions(JSON.parse(savedSessions));
 
     // IP Check
     const checkAdminAccess = async () => {
@@ -266,9 +260,10 @@ export default function App() {
     }
   }, [privacyAccepted, user, authMode]);
 
-  // 🔄 IDENTITY-BASED USAGE SYNC
+  // 🔄 IDENTITY-BASED DATA SYNC (USER ISOLATION)
   useEffect(() => {
     if (user && user.email) {
+        // 1. USAGE
         const userUsageKey = `syko_usage_${user.email}`;
         const storedUsage = localStorage.getItem(userUsageKey);
         
@@ -283,20 +278,50 @@ export default function App() {
         } else {
             setUsage(DEFAULT_USAGE);
         }
+
+        // 2. SESSIONS (Per User)
+        const userSessionsKey = `syko_sessions_${user.email}`;
+        const storedSessions = localStorage.getItem(userSessionsKey);
+        if (storedSessions) {
+            setSessions(JSON.parse(storedSessions));
+        } else {
+            setSessions([]);
+        }
+
+        // 3. WALLET (Per User)
+        const userWalletKey = `syko_wallet_${user.email}`;
+        const storedWallet = localStorage.getItem(userWalletKey);
+        if (storedWallet) {
+            setWallet(JSON.parse(storedWallet));
+        } else {
+            setWallet({ balance: 0, proCredits: 0 });
+        }
+    } else {
+        // No user logged in -> Clear sensitive state
+        setSessions([]);
+        setMessages([]);
+        setWallet({ balance: 0, proCredits: 0 });
     }
   }, [user]);
 
-  // 💾 PERSISTENCE EFFECTS
-  useEffect(() => { localStorage.setItem('syko_wallet', JSON.stringify(wallet)); }, [wallet]);
+  // 💾 PERSISTENCE EFFECTS (SAVES ONLY IF USER EXISTS)
+  useEffect(() => { 
+      if (user && user.email) {
+        localStorage.setItem(`syko_wallet_${user.email}`, JSON.stringify(wallet)); 
+      }
+  }, [wallet, user]);
   
   useEffect(() => { 
       if (user && user.email) {
-          const userUsageKey = `syko_usage_${user.email}`;
-          localStorage.setItem(userUsageKey, JSON.stringify(usage)); 
+          localStorage.setItem(`syko_usage_${user.email}`, JSON.stringify(usage)); 
       }
   }, [usage, user]);
   
-  useEffect(() => { localStorage.setItem('syko-sessions', JSON.stringify(sessions)); }, [sessions]);
+  useEffect(() => { 
+      if (user && user.email) {
+        localStorage.setItem(`syko_sessions_${user.email}`, JSON.stringify(sessions)); 
+      }
+  }, [sessions, user]);
 
   // 🔄 SOHBET GEÇMİŞİNİ OTOMATİK KAYDET (AUTO-SYNC SESSIONS)
   useEffect(() => {
@@ -469,8 +494,35 @@ export default function App() {
   
   const handleLogout = () => { 
       localStorage.removeItem('syko_active_user');
-      setUser(null); setIsVerifying(false); setVerifyStep(0); setEmail(''); setPassword(''); setFullName(''); setAuthError(''); 
+      // CLEAN UP ALL STATE TO PREVENT DATA LEAK BETWEEN ACCOUNTS
+      setUser(null); 
+      setSessions([]);
+      setMessages([]);
+      setCurrentSessionId(null);
+      setWallet({ balance: 0, proCredits: 0 });
+      setIsVerifying(false); 
+      setVerifyStep(0); 
+      setEmail(''); 
+      setPassword(''); 
+      setFullName(''); 
+      setAuthError(''); 
   };
+  
+  // 🔥 DELETE SESSION HANDLER
+  const handleDeleteSession = (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation(); // Parent click event'i tetikleme (Chati açma)
+    
+    // 1. Session listesinden çıkar
+    const newSessions = sessions.filter(s => s.id !== sessionId);
+    setSessions(newSessions);
+    
+    // 2. Eğer silinen session şu an açıksa, ekranı temizle
+    if (currentSessionId === sessionId) {
+        setMessages([]);
+        setCurrentSessionId(null);
+    }
+  };
+
   const toggleVoiceInput = () => { if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return; } const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SpeechRecognition) return alert("Desteklenmiyor."); const rec = new SpeechRecognition(); rec.lang = 'tr-TR'; rec.onstart = () => setIsListening(true); rec.onend = () => setIsListening(false); rec.onresult = (e: any) => setInput(Array.from(e.results).map((r: any) => r[0].transcript).join('')); recognitionRef.current = rec; rec.start(); };
   const toggleTheme = () => { const newTheme = theme === Theme.DARK ? Theme.LIGHT : Theme.DARK; setTheme(newTheme); document.documentElement.className = newTheme; localStorage.setItem('syko-theme', newTheme); };
 
@@ -755,8 +807,20 @@ export default function App() {
         <div className="flex-1 overflow-y-auto px-3 space-y-1 mt-4">
           <div className="px-2 pb-2 text-[10px] font-bold opacity-30 uppercase tracking-widest">Session History</div>
           {sessions.map(s => (
-            <div key={s.id} onClick={() => {setMessages(s.messages); setCurrentSessionId(s.id); setSidebarOpen(false);}} className={`group flex items-center justify-between px-3 py-3 rounded-xl cursor-pointer transition-all ${currentSessionId === s.id ? 'bg-black/10 dark:bg-white/10 font-bold' : 'opacity-60 hover:opacity-100 hover:bg-black/5'}`}>
-              <div className="flex items-center gap-3 truncate text-sm"><Icons.Chat size={14} /><span className="truncate">{s.title}</span></div>
+            <div key={s.id} onClick={() => {setMessages(s.messages); setCurrentSessionId(s.id); setSidebarOpen(false);}} className={`group relative flex items-center justify-between px-3 py-3 rounded-xl cursor-pointer transition-all ${currentSessionId === s.id ? 'bg-black/10 dark:bg-white/10 font-bold' : 'opacity-60 hover:opacity-100 hover:bg-black/5'}`}>
+              <div className="flex items-center gap-3 truncate text-sm flex-1">
+                  <Icons.Chat size={14} />
+                  <span className="truncate max-w-[140px]">{s.title}</span>
+              </div>
+              
+              {/* DELETE BUTTON (Hover'da görünür) */}
+              <button 
+                onClick={(e) => handleDeleteSession(e, s.id)}
+                className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-lg transition-all"
+                title="Sohbeti Sil"
+              >
+                  <Icons.Trash size={14} />
+              </button>
             </div>
           ))}
         </div>

@@ -11,8 +11,13 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const isUser = message.role === 'user';
   const [isExpanded, setIsExpanded] = useState(true); 
   
-  // Parsing Logic
+  // Parsing Logic - GÜÇLENDİRİLMİŞ DEFANSİF KOD
   const parseContent = (rawContent: string) => {
+    // Eğer içerik null, undefined veya boş ise çökmemesi için default değerler dön
+    if (!rawContent) {
+        return { hasThought: false, thought: "", content: "", isThinking: false };
+    }
+
     let thought = "";
     let content = rawContent;
     let hasThought = false;
@@ -21,22 +26,28 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     const startTag = "<think>";
     const endTag = "</think>";
 
-    if (rawContent.includes(startTag)) {
-      hasThought = true;
-      const startIndex = rawContent.indexOf(startTag) + startTag.length;
-      
-      if (rawContent.includes(endTag)) {
-        // Düşünce tamamlanmış
-        const endIndex = rawContent.indexOf(endTag);
-        thought = rawContent.substring(startIndex, endIndex).trim();
-        content = rawContent.substring(endIndex + endTag.length).trim();
-        isThinking = false;
-      } else {
-        // Düşünce hala akıyor (Streaming)
-        thought = rawContent.substring(startIndex).trim();
-        content = ""; // Henüz cevap yok, sadece düşünüyor
-        isThinking = true;
-      }
+    try {
+        if (rawContent.includes(startTag)) {
+          hasThought = true;
+          const startIndex = rawContent.indexOf(startTag) + startTag.length;
+          
+          if (rawContent.includes(endTag)) {
+            // Düşünce tamamlanmış
+            const endIndex = rawContent.indexOf(endTag);
+            thought = rawContent.substring(startIndex, endIndex).trim();
+            content = rawContent.substring(endIndex + endTag.length).trim();
+            isThinking = false;
+          } else {
+            // Düşünce hala akıyor (Streaming)
+            thought = rawContent.substring(startIndex).trim();
+            content = ""; // Henüz cevap yok, sadece düşünüyor
+            isThinking = true;
+          }
+        }
+    } catch (e) {
+        // Parsing sırasında beklenmedik bir hata olursa raw içeriği göster, çökme.
+        console.error("Message parsing error:", e);
+        content = rawContent;
     }
 
     return { hasThought, thought, content, isThinking };
