@@ -883,7 +883,8 @@ export default function App() {
                   }
                 }} />
                 
-                <button onClick={() => fileInputRef.current?.click()} disabled={isImageGenMode} className={`absolute left-3 bottom-3 p-2 rounded-xl transition-colors z-10 ${isImageGenMode ? 'opacity-20 cursor-not-allowed text-gray-500' : 'text-black/50 dark:text-white/50 hover:bg-black/5 hover:text-black dark:hover:text-white'}`}><Icons.Plus size={18} /></button>
+                {/* DÜZELTME: isImageGenMode olduğunda buton artık disabled DEĞİL. Rengi de mor oluyor. */}
+                <button onClick={() => fileInputRef.current?.click()} className={`absolute left-3 bottom-3 p-2 rounded-xl transition-colors z-10 ${isImageGenMode ? 'text-purple-600 hover:bg-purple-500/10' : 'text-black/50 dark:text-white/50 hover:bg-black/5 hover:text-black dark:hover:text-white'}`}><Icons.Plus size={18} /></button>
                 
                 <div className="absolute left-12 bottom-3 z-20" ref={menuRef}>
                     <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 rounded-xl hover:bg-black/5 text-black/50 dark:text-white/50 transition-colors hover:text-black dark:hover:text-white"><Icons.MoreHorizontal size={18} /></button>

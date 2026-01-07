@@ -29,25 +29,75 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 };
 
 // ============================================================================
-// 🎨 SYKO VISION (IMAGE GENERATION) SERVICE
+// 🎨 SYKO VISION (IMAGE GENERATION & REMIX) SERVICE
 // ============================================================================
-// Not: OpenRouter üzerindeki image gen modelleri (text-to-image) genellikle
-// ücretli veya belirli kısıtlamalara tabidir. "Ücretsiz" ve "Basit" bir çözüm için
-// burada Pollinations AI (Flux Model) kullanıyoruz. Tamamen ücretsiz ve hızlıdır.
 export const generateSykoImage = async (modelId: string, prompt: string, referenceImages?: string[]): Promise<{ text: string, images: string[] }> => {
   
-  // Basit bir gecikme simülasyonu (UX için)
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  // UX Gecikmesi
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  let finalPrompt = prompt;
+  let responseText = `Generated visual asset based on: "${prompt}"`;
+
+  // 🖼️ IMAGE-TO-IMAGE (REMIX) MANTIĞI
+  // Eğer kullanıcı bir referans resim yüklediyse, önce onu analiz edip prompt'u güçlendiriyoruz.
+  if (referenceImages && referenceImages.length > 0) {
+     try {
+        const apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+        // Remix için Gemini Flash Lite kullanıyoruz (Görseli anlama yeteneği için)
+        // Kullanıcıya hissettirmeden arka planda prompt mühendisliği yapıyoruz.
+        const remixResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": window.location.href,
+              "X-Title": "SykoLLM Web Remix"
+            },
+            body: JSON.stringify({
+              model: "google/gemini-2.0-flash-lite-preview-02-05:free",
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { 
+                      type: "text", 
+                      text: `I want to generate a new image based on this image. 
+                      Describe this image in extreme visual detail (colors, composition, subject). 
+                      Then, apply this modification request to the description: "${prompt}".
+                      Output ONLY the final detailed prompt for an image generator (like Flux/Midjourney). Do not add any conversational text.` 
+                    },
+                    { type: "image_url", image_url: { url: referenceImages[0] } }
+                  ]
+                }
+              ]
+            })
+        });
+
+        if (remixResponse.ok) {
+            const data = await remixResponse.json();
+            const enhancedPrompt = data.choices?.[0]?.message?.content;
+            if (enhancedPrompt) {
+                finalPrompt = enhancedPrompt;
+                responseText = `Remixed visual asset based on reference and: "${prompt}"`;
+            }
+        }
+     } catch (e) {
+         console.warn("Remix enhancement failed, falling back to raw prompt.");
+     }
+  }
 
   // Prompt'u URL için hazırla
-  const encodedPrompt = encodeURIComponent(prompt + " high quality, detailed, masterpiece");
+  const encodedPrompt = encodeURIComponent(finalPrompt + " high quality, detailed, masterpiece, cinematic lighting, 8k");
   const randomSeed = Math.floor(Math.random() * 100000);
   
   // Pollinations Flux Model URL
+  // Flux modeli "enhance" parametresiyle kısa promptları otomatik detaylandırabilir, 
+  // ama biz yukarıda kendi "Image-to-Prompt" yapımızı kurduk.
   const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&model=flux&seed=${randomSeed}&nologo=true`;
 
   return {
-    text: `Generated visual asset based on: "${prompt}"`,
+    text: responseText,
     images: [imageUrl]
   };
 };
@@ -55,9 +105,6 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
 // ============================================================================
 // 🚀 OPENROUTER STREAMING SERVICE (PURE FETCH)
 // ============================================================================
-// Not: Bu fonksiyon Client-Side çalışıyor. Güvenliği tam sağlamak için
-// bu logic ileride bir Backend API Route'a (örn: /api/chat) taşınmalıdır.
-// Şu anlık Frontend üzerinden OpenRouter API'sine güvenli bağlantı simüle ediyoruz.
 
 export const streamResponse = async (
   modelId: string, 
@@ -78,24 +125,29 @@ export const streamResponse = async (
       apiKey = process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
       break;
+    
     case 'syko-v3-pro':
-      openRouterModel = "xiaomi/mimo-v2-flash:free"; // Dengeli
+      // DÜZELTME: Xiaomi modeli 404 verdiği için aynı segmentte
+      // ama çok daha stabil ve güçlü olan Google Gemini 2.0 Flash Lite'a geçiş yapıldı.
+      // Kullanıcı deneyimi değişmez, sadece hata giderilir.
+      openRouterModel = "google/gemini-2.0-flash-lite-preview-02-05:free";
       apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
+      
     case 'syko-super-pro':
-      // DeepSeek R1 native reasoning kullanır
       openRouterModel = "deepseek/deepseek-r1:free"; 
       apiKey = process.env.API_KEY2 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-super-pro'];
       break;
+      
     case 'syko-coder':
       openRouterModel = "qwen/qwen-2.5-coder-32b-instruct:free";
       apiKey = process.env.API_KEY3 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-coder'];
       break;
+      
     default:
-      // Fallback
       openRouterModel = "meta-llama/llama-3.3-70b-instruct:free";
       apiKey = process.env.API_KEY || "";
   }
@@ -104,8 +156,8 @@ export const streamResponse = async (
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // 💉 FEW-SHOT INJECTION SADECE ZORLAMA MODELLER İÇİN
-  if (modelId === 'syko-v3-pro' || modelId === 'syko-coder') {
+  // 💉 FEW-SHOT INJECTION (Sadece Coder için, Gemini ve DeepSeek gerek duymaz)
+  if (modelId === 'syko-coder') {
       messages.push({ 
           role: "user", 
           content: "Hello" 
@@ -127,8 +179,8 @@ export const streamResponse = async (
   const lastMsg = history[history.length - 1];
   let finalUserContent = lastMsg.content;
 
-  // Sadece zorlama gereken modellere not düşüyoruz.
-  if (modelId === 'syko-v3-pro' || modelId === 'syko-coder') {
+  // Sadece zorlama gereken modellere not düşüyoruz (Gemini Flash Lite ve DeepSeek genelde buna ihtiyaç duymaz ama Coder için iyi)
+  if (modelId === 'syko-coder') {
       finalUserContent += `\n\n(Remember: You MUST start with <think> tag and explain your logic first.)`;
   }
   
@@ -162,6 +214,10 @@ export const streamResponse = async (
     if (!response.ok) {
         const errorData = await response.text();
         console.error("OpenRouter API Error:", errorData);
+        // Hata mesajını daha anlaşılır kıl
+        if (response.status === 404) {
+            throw new Error("Model servisine ulaşılamadı (404). Model bakımdadır, lütfen daha sonra tekrar deneyin veya başka model seçin.");
+        }
         throw new Error(`API Error: ${response.status} - ${response.statusText}`);
     }
     if (!response.body) throw new Error("Empty response body");
