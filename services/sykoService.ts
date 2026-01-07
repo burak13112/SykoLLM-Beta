@@ -33,7 +33,7 @@ const extractBase64Data = (dataUrl: string) => {
 };
 
 // ============================================================================
-// 🎨 SYKO VISION (IMAGEN 3 POWERED)
+// 🎨 SYKO VISION (GEMINI 2.5 FLASH IMAGE)
 // ============================================================================
 export const generateSykoImage = async (modelId: string, prompt: string, referenceImages?: string[]): Promise<{ text: string, images: string[] }> => {
   
@@ -47,83 +47,64 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
       throw new Error("API_KEY4 eksik! Görsel üretimi için Google AI Studio anahtarı gerekli.");
   }
 
-  let finalPrompt = prompt;
-  
-  // 1. PROMPT GÜÇLENDİRME (Prompt Engineering) - Gemini 1.5 Flash (Stabil)
+  // KULLANICININ İSTEDİĞİ MODEL
+  const targetModel = "gemini-2.5-flash-image";
+
   try {
-      // 404 hatasını çözmek için 'gemini-2.0-flash' yerine 'gemini-1.5-flash' kullanıyoruz.
-      const enhancementResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+      // Gemini Görsel Üretim Endpoint'i (generateContent kullanılır)
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
               contents: [{
-                  parts: [{
-                      text: `You are an expert AI Art Director. 
-                      Rewrite this user prompt into a concise but highly descriptive prompt suitable for an AI image generator (Imagen 3).
-                      Focus on subject, style, lighting, and composition.
-                      USER PROMPT: "${prompt}"
-                      Output ONLY the raw English prompt. No introductions.`
-                  }]
+                  parts: [{ text: prompt }]
               }]
           })
       });
 
-      if (enhancementResponse.ok) {
-          const data = await enhancementResponse.json();
-          const enhancedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (enhancedText) {
-              console.log("Original Prompt:", prompt);
-              console.log("Enhanced Prompt:", enhancedText);
-              finalPrompt = enhancedText.trim();
-          }
-      }
-  } catch (e) {
-      console.warn("Prompt enhancement failed, using raw prompt.", e);
-  }
-
-  // 2. IMAGEN 3 İLE GÖRSEL ÜRETİMİ (Stabil)
-  // Gemini 2.5 Flash Image 429 verdiği için Imagen 3.0 kullanıyoruz.
-  try {
-      // Not: Imagen API yapısı Gemini generateContent'ten farklıdır.
-      const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:generateImages?key=${geminiKey}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-              prompt: finalPrompt,
-              number_of_images: 1,
-              // referenceImages desteği Imagen REST API'da farklı olduğu için şimdilik sadece Text-to-Image
-          })
-      });
-
-      if (!imagenResponse.ok) {
-          const errText = await imagenResponse.text();
-          console.error("Imagen API Error:", errText);
+      if (!response.ok) {
+          const errText = await response.text();
+          console.error("Gemini Image Gen API Error:", errText);
           
-          // Hata mesajını daha anlaşılır yap
-          if (errText.includes("429") || imagenResponse.status === 429) {
-             throw new Error("Google Resim Üretme Kotası Doldu (429). Lütfen daha sonra deneyin.");
+          if (response.status === 404) {
+             throw new Error(`Model Bulunamadı (404): ${targetModel}. İsim hatalı veya Google bu modeli kaldırmış.`);
           }
-          throw new Error(`Görsel üretilemedi (${imagenResponse.status}): ${imagenResponse.statusText}`);
+          if (response.status === 429) {
+             throw new Error("Google API Kotası Doldu (429). Model şu an aşırı yoğun.");
+          }
+          throw new Error(`API Hatası (${response.status}): ${response.statusText}`);
       }
 
-      const data = await imagenResponse.json();
+      const data = await response.json();
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const images: string[] = [];
+      let textOutput = "";
       
-      // Imagen Base64 döner
-      const imageBytes = data.generatedImages?.[0]?.image?.imageBytes;
+      // Inline Data (Base64) kontrolü
+      for (const part of parts) {
+          if (part.inline_data) {
+             images.push(`data:${part.inline_data.mime_type};base64,${part.inline_data.data}`);
+          } else if (part.text) {
+             textOutput += part.text;
+          }
+      }
 
-      if (imageBytes) {
-          const generatedImageUrl = `data:image/jpeg;base64,${imageBytes}`;
+      if (images.length > 0) {
           return {
-              text: `**Syko Vision (Imagen 3)** tarafından oluşturuldu.\n\n*Prompt: ${finalPrompt}*`,
-              images: [generatedImageUrl]
+              text: textOutput || `**${targetModel}** tarafından oluşturuldu.`,
+              images: images
           };
       } else {
-          throw new Error("Model geçerli bir görsel verisi döndürmedi.");
+          // Eğer image yoksa safety filter'a takılmış olabilir
+          throw new Error("Model cevap verdi ama görsel içermiyor. Prompt'unuz güvenlik filtresine takılmış olabilir.");
       }
 
   } catch (error: any) {
       console.error("Görsel Üretim Hatası:", error);
-      throw new Error("Görsel oluşturulamadı: " + error.message);
+      if (error.name === "TypeError" && error.message === "Failed to fetch") {
+          throw new Error("Bağlantı Hatası: API'ye ulaşılamadı. Ağınızı kontrol edin.");
+      }
+      throw error;
   }
 };
 
@@ -139,8 +120,7 @@ const getVisionDescription = async (imageUrl: string): Promise<string> => {
 
         const { mimeType, data } = extractBase64Data(imageUrl);
 
-        // 404 hatasını çözmek için 'gemini-2.0-flash' yerine 'gemini-1.5-flash' kullanıyoruz.
-        // Gemini 1.5 Flash Vision konusunda çok yetenekli ve stabildir.
+        // Vision analiz için Gemini 1.5 Flash kullanımı (En stabil vision modeli)
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -169,7 +149,7 @@ const getVisionDescription = async (imageUrl: string): Promise<string> => {
 };
 
 // ============================================================================
-// 🚀 OPENROUTER STREAMING SERVICE (Sohbet Modelleri)
+// 🚀 OPENROUTER STREAMING SERVICE (Sohbet Modelleri - DOKUNULMADI)
 // ============================================================================
 
 export const streamResponse = async (
@@ -217,10 +197,8 @@ export const streamResponse = async (
   
   const lastMsg = history[history.length - 1];
   let finalUserContent = lastMsg.content;
-  let useVisionBridge = false;
-
+  
   // 🌉 VISION BRIDGE LOGIC (Resimli Sohbet)
-  // Eğer kullanıcı resim attıysa, model ne olursa olsun resmi GEMINI (API_KEY4) ile okuyoruz.
   if (images && images.length > 0) {
       console.log(`[SykoLLM System] Vision Bridge Activated using Google Gemini (API_KEY4)...`);
       
@@ -235,8 +213,6 @@ export const streamResponse = async (
       [USER REQUEST BASED ON THIS IMAGE]:
       ${lastMsg.content}
       `;
-
-      useVisionBridge = true;
   }
 
   if (!apiKey) throw new Error(`API Anahtarı eksik! (${modelId}). Lütfen .env dosyasını kontrol et.`);
@@ -250,8 +226,6 @@ export const streamResponse = async (
     });
   }
 
-  // Vision Bridge kullanılıyorsa, dönüştürülmüş metni yolla.
-  // Kullanılmıyorsa (resim yoksa) normal metni yolla.
   messages.push({ role: "user", content: finalUserContent });
 
   try {
