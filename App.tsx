@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Message, ChatSession, ModelConfig, Theme, UserWallet, DailyUsage, ModelUsage } from './types.ts';
+import { Message, ChatSession, ModelConfig, Theme, UserWallet, DailyUsage, ModelUsage } from './types';
 import { streamResponse, generateSykoImage } from './services/sykoService';
 import { Icons } from './components/Icon';
 import { ModelSelector } from './components/ModelSelector';
@@ -22,7 +22,7 @@ const MODELS: ModelConfig[] = [
     name: 'SykoLLM V2.5', 
     tag: 'FAST', 
     description: 'Our fast model, optimized for everyday tasks and quick responses.', 
-    supportsImages: true // ARTIK HEPSİ GÖRSEL DESTEKLİYOR (Auto-Swap ile)
+    supportsImages: true 
   },
   { 
     id: 'syko-v3-pro', 
@@ -36,21 +36,21 @@ const MODELS: ModelConfig[] = [
     name: 'SykoLLM SUPER PRO', 
     tag: 'O1-PREVIEW', 
     description: 'Our most advanced reasoning model. Thinks deeply before answering complex queries.', 
-    supportsImages: true // ARTIK HEPSİ GÖRSEL DESTEKLİYOR
+    supportsImages: true 
   },
   { 
     id: 'syko-coder', 
     name: 'SykoLLM Coder', 
     tag: 'DEV', 
     description: 'Specialized for programming tasks, debugging, and code generation.', 
-    supportsImages: true // ARTIK HEPSİ GÖRSEL DESTEKLİYOR
+    supportsImages: true 
   },
   {
     id: 'syko-vision',
     name: 'SykoLLM VISION',
     tag: 'CREATOR',
     description: 'Our advanced visual generation engine. Transforms text prompts into high-fidelity visual assets.',
-    supportsImages: true // Remix için gerekli
+    supportsImages: true 
   }
 ];
 
@@ -64,7 +64,7 @@ const LIMITS = {
   pro: { text: 15, imageGen: 1, vision: 1 },
   super: { text: 3, imageGen: 1, vision: 1 },
   coder: { text: 5, imageGen: 0, vision: 0 },
-  vision: { text: 0, imageGen: 5, vision: 0 } // Vision modeli için limitler
+  vision: { text: 0, imageGen: 5, vision: 0 } 
 };
 
 const PACKAGES = [
@@ -73,7 +73,6 @@ const PACKAGES = [
   { credits: 60, price: 350 },
 ];
 
-// Varsayılan boş kullanım objesi
 const DEFAULT_USAGE: DailyUsage = {
   date: new Date().toISOString().split('T')[0],
   v25: { text: 0, imageGen: 0, vision: 0 },
@@ -83,18 +82,49 @@ const DEFAULT_USAGE: DailyUsage = {
   vision: { text: 0, imageGen: 0, vision: 0 }
 };
 
+// --- YARDIMCI FONKSİYONLAR (GÜVENLİ STORAGE) ---
+const safeGetStorage = (key: string, type: 'local' | 'session') => {
+  try {
+    const storage = type === 'local' ? localStorage : sessionStorage;
+    return storage.getItem(key);
+  } catch (e) {
+    console.warn(`${type}Storage access blocked.`);
+    return null;
+  }
+};
+
+const safeSetStorage = (key: string, value: string, type: 'local' | 'session') => {
+  try {
+    const storage = type === 'local' ? localStorage : sessionStorage;
+    storage.setItem(key, value);
+  } catch (e) {
+    console.warn(`${type}Storage write blocked.`);
+  }
+};
+
+const safeRemoveStorage = (key: string, type: 'local' | 'session') => {
+  try {
+    const storage = type === 'local' ? localStorage : sessionStorage;
+    storage.removeItem(key);
+  } catch (e) {
+    console.warn(`${type}Storage remove blocked.`);
+  }
+};
+
+
 export default function App() {
-  // Privacy State - LAZY INIT (F5 Oturum Koruma)
+  // Privacy State (LocalStorage OK for consent)
   const [privacyAccepted, setPrivacyAccepted] = useState(() => {
-    return localStorage.getItem('syko_privacy_consent') === 'true';
+    return safeGetStorage('syko_privacy_consent', 'local') === 'true';
   });
   
   const [privacyCheckbox, setPrivacyCheckbox] = useState(false);
   const [showDetailedPolicy, setShowDetailedPolicy] = useState(false);
 
-  // Auth State - LAZY INIT (F5 Oturum Koruma)
+  // Auth State - SESSION STORAGE (Daha Güvenli)
+  // Tarayıcı kapanırsa oturum biter.
   const [user, setUser] = useState<{name: string, email: string, picture: string} | null>(() => {
-    const savedUser = localStorage.getItem('syko_active_user');
+    const savedUser = safeGetStorage('syko_active_session', 'session');
     return savedUser ? JSON.parse(savedUser) : null;
   });
 
@@ -108,7 +138,6 @@ export default function App() {
   const [fullName, setFullName] = useState('');
   const [authError, setAuthError] = useState('');
   
-  // Login Info State
   const [showLoginInfo, setShowLoginInfo] = useState(false);
 
   // App State
@@ -131,13 +160,8 @@ export default function App() {
   const [isShopOpen, setIsShopOpen] = useState(false);
   const [shopTab, setShopTab] = useState<'credits' | 'deposit'>('credits');
   const [depositAmount, setDepositAmount] = useState<number>(50);
-  const [ccNumber, setCcNumber] = useState('');
-  const [ccName, setCcName] = useState('');
-  const [ccExpiry, setCcExpiry] = useState('');
-  const [ccCvv, setCcCvv] = useState('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
-  // Security State
   const [canShowDevButton, setCanShowDevButton] = useState(false);
   
   // Voice State
@@ -164,7 +188,7 @@ export default function App() {
     }
   }, [currentModel]);
 
-  // --- GOOGLE AUTH HELPERS (GERÇEK) ---
+  // --- GOOGLE AUTH HELPERS ---
   const renderGoogleButton = () => {
     const btn = document.getElementById('google-btn');
     if (btn && window.google) {
@@ -187,9 +211,9 @@ export default function App() {
       const payload = JSON.parse(atob(response.credential.split('.')[1])); 
       const googleUser = { name: payload.name, email: payload.email, picture: payload.picture };
       
-      // Kullanıcıyı State'e ve LocalStorage'a kaydet (Persistence)
+      // SAVE TO SESSION STORAGE (SECURE)
       setUser(googleUser); 
-      localStorage.setItem('syko_active_user', JSON.stringify(googleUser));
+      safeSetStorage('syko_active_session', JSON.stringify(googleUser), 'session');
       
       startVerificationSequence(); 
     } catch (e) { 
@@ -199,13 +223,12 @@ export default function App() {
 
   // Initialize
   useEffect(() => {
-    const savedTheme = localStorage.getItem('syko-theme') as Theme;
+    const savedTheme = safeGetStorage('syko-theme', 'local') as Theme;
     if (savedTheme) {
       setTheme(savedTheme);
       document.documentElement.className = savedTheme;
     }
 
-    // IP Check
     const checkAdminAccess = async () => {
       if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
         setCanShowDevButton(true);
@@ -219,17 +242,11 @@ export default function App() {
     };
     checkAdminAccess();
 
-    // Init Google Auth (REAL)
     const initGoogle = () => {
       if (window.google) {
         const clientID = process.env.GOOGLE_CLIENT_ID;
-        
-        if (!clientID || clientID.includes("BURAYA")) {
-           console.warn("UYARI: Google Client ID tanımlı değil. Google girişi çalışmayacaktır.");
-        }
-
         window.google.accounts.id.initialize({
-          client_id: clientID, // Burası artık vite.config.ts'den geliyor
+          client_id: clientID,
           callback: handleGoogleLogin,
           auto_select: false,
           cancel_on_tap_outside: false
@@ -251,7 +268,6 @@ export default function App() {
     }
   }, []);
 
-  // RE-RENDER GOOGLE BUTTON
   useEffect(() => {
     if (privacyAccepted && !user) {
       setTimeout(() => {
@@ -260,12 +276,12 @@ export default function App() {
     }
   }, [privacyAccepted, user, authMode]);
 
-  // 🔄 IDENTITY-BASED DATA SYNC (USER ISOLATION)
+  // 🔄 IDENTITY-BASED DATA SYNC
   useEffect(() => {
     if (user && user.email) {
-        // 1. USAGE
+        // Usage Data (Keep in LocalStorage per user to track limits)
         const userUsageKey = `syko_usage_${user.email}`;
-        const storedUsage = localStorage.getItem(userUsageKey);
+        const storedUsage = safeGetStorage(userUsageKey, 'local');
         
         if (storedUsage) {
             const parsedUsage = JSON.parse(storedUsage);
@@ -279,51 +295,33 @@ export default function App() {
             setUsage(DEFAULT_USAGE);
         }
 
-        // 2. SESSIONS (Per User)
         const userSessionsKey = `syko_sessions_${user.email}`;
-        const storedSessions = localStorage.getItem(userSessionsKey);
+        const storedSessions = safeGetStorage(userSessionsKey, 'local');
         if (storedSessions) {
             setSessions(JSON.parse(storedSessions));
         } else {
             setSessions([]);
         }
 
-        // 3. WALLET (Per User)
         const userWalletKey = `syko_wallet_${user.email}`;
-        const storedWallet = localStorage.getItem(userWalletKey);
+        const storedWallet = safeGetStorage(userWalletKey, 'local');
         if (storedWallet) {
             setWallet(JSON.parse(storedWallet));
         } else {
             setWallet({ balance: 0, proCredits: 0 });
         }
     } else {
-        // No user logged in -> Clear sensitive state
         setSessions([]);
         setMessages([]);
         setWallet({ balance: 0, proCredits: 0 });
     }
   }, [user]);
 
-  // 💾 PERSISTENCE EFFECTS (SAVES ONLY IF USER EXISTS)
-  useEffect(() => { 
-      if (user && user.email) {
-        localStorage.setItem(`syko_wallet_${user.email}`, JSON.stringify(wallet)); 
-      }
-  }, [wallet, user]);
-  
-  useEffect(() => { 
-      if (user && user.email) {
-          localStorage.setItem(`syko_usage_${user.email}`, JSON.stringify(usage)); 
-      }
-  }, [usage, user]);
-  
-  useEffect(() => { 
-      if (user && user.email) {
-        localStorage.setItem(`syko_sessions_${user.email}`, JSON.stringify(sessions)); 
-      }
-  }, [sessions, user]);
+  // 💾 PERSISTENCE (LocalStorage is ok for data, but NOT for Auth)
+  useEffect(() => { if (user?.email) safeSetStorage(`syko_wallet_${user.email}`, JSON.stringify(wallet), 'local'); }, [wallet, user]);
+  useEffect(() => { if (user?.email) safeSetStorage(`syko_usage_${user.email}`, JSON.stringify(usage), 'local'); }, [usage, user]);
+  useEffect(() => { if (user?.email) safeSetStorage(`syko_sessions_${user.email}`, JSON.stringify(sessions), 'local'); }, [sessions, user]);
 
-  // 🔄 SOHBET GEÇMİŞİNİ OTOMATİK KAYDET (AUTO-SYNC SESSIONS)
   useEffect(() => {
     if (!user || messages.length === 0) return;
 
@@ -372,13 +370,12 @@ export default function App() {
     if (currentModel === 'syko-v3-pro') modelKey = 'pro';
     if (currentModel === 'syko-super-pro') modelKey = 'super';
     if (currentModel === 'syko-coder') modelKey = 'coder';
-    if (currentModel === 'syko-vision') modelKey = 'vision'; // Limitlerde vision key'i yoksa patlar, ekledik mi? Evet.
+    if (currentModel === 'syko-vision') modelKey = 'vision';
 
-    // Typescript trick for dynamic key
     const limitsAny = LIMITS as any;
     const usageAny = usage as any;
 
-    if (!usageAny[modelKey]) return true; // Eğer model limitlerde tanımlı değilse geç
+    if (!usageAny[modelKey]) return true;
 
     const currentUsage = usageAny[modelKey][action];
     const maxLimit = limitsAny[modelKey] ? limitsAny[modelKey][action] : 10;
@@ -437,7 +434,6 @@ export default function App() {
       setWallet(prev => ({ ...prev, balance: prev.balance + depositAmount }));
       setIsProcessingPayment(false);
       setShopTab('credits');
-      setCcNumber(''); setCcName(''); setCcExpiry(''); setCcCvv(''); 
       alert(`Başarılı! ${depositAmount} TL cüzdanınıza eklendi.`);
     }, 2000);
   };
@@ -455,27 +451,33 @@ export default function App() {
     alert(`${pkg.credits} Mesaj Kredisi hesabınıza tanımlandı.`);
   };
 
-  const handlePrivacySubmit = () => { if (privacyCheckbox) { localStorage.setItem('syko_privacy_consent', 'true'); setPrivacyAccepted(true); } };
+  const handlePrivacySubmit = () => { 
+      if (privacyCheckbox) { 
+          safeSetStorage('syko_privacy_consent', 'true', 'local'); 
+          setPrivacyAccepted(true); 
+      } 
+  };
   
   const handleCustomAuth = (e: React.FormEvent) => {
     e.preventDefault(); setAuthError('');
     if (!email || !password) { setAuthError('Please fill in all fields.'); return; }
-    const storedUsersStr = localStorage.getItem('syko_users'); const storedUsers = storedUsersStr ? JSON.parse(storedUsersStr) : [];
+    const storedUsersStr = safeGetStorage('syko_users', 'local'); 
+    const storedUsers = storedUsersStr ? JSON.parse(storedUsersStr) : [];
     if (authMode === 'register') {
       if (!fullName) { setAuthError('Name is required.'); return; }
       if (storedUsers.find((u: any) => u.email === email)) { setAuthError('Account already exists.'); return; }
       const newUser = { email, password, name: fullName, picture: `https://api.dicebear.com/7.x/initials/svg?seed=${fullName}` };
-      localStorage.setItem('syko_users', JSON.stringify([...storedUsers, newUser]));
+      safeSetStorage('syko_users', JSON.stringify([...storedUsers, newUser]), 'local');
       
       setUser({ name: newUser.name, email: newUser.email, picture: newUser.picture });
-      localStorage.setItem('syko_active_user', JSON.stringify({ name: newUser.name, email: newUser.email, picture: newUser.picture }));
+      safeSetStorage('syko_active_session', JSON.stringify({ name: newUser.name, email: newUser.email, picture: newUser.picture }), 'session');
       startVerificationSequence();
     } else {
       const foundUser = storedUsers.find((u: any) => u.email === email && u.password === password);
       if (foundUser) { 
           const activeUser = { name: foundUser.name, email: foundUser.email, picture: foundUser.picture };
           setUser(activeUser); 
-          localStorage.setItem('syko_active_user', JSON.stringify(activeUser));
+          safeSetStorage('syko_active_session', JSON.stringify(activeUser), 'session');
           startVerificationSequence(); 
       } else { 
           setAuthError('Invalid email or password.'); 
@@ -486,15 +488,15 @@ export default function App() {
   const handleDemoLogin = () => { 
       const adminUser = { name: "Developer Admin", email: ADMIN_EMAIL, picture: "https://api.dicebear.com/7.x/avataaars/svg?seed=SykoAdmin" };
       setUser(adminUser);
-      localStorage.setItem('syko_active_user', JSON.stringify(adminUser));
+      safeSetStorage('syko_active_session', JSON.stringify(adminUser), 'session');
       startVerificationSequence(); 
   };
   
   const startVerificationSequence = () => { setIsVerifying(true); let step = 0; const interval = setInterval(() => { step++; setVerifyStep(step); if (step >= 4) { clearInterval(interval); setTimeout(() => setIsVerifying(false), 1000); } }, 1000); };
   
   const handleLogout = () => { 
-      localStorage.removeItem('syko_active_user');
-      // CLEAN UP ALL STATE TO PREVENT DATA LEAK BETWEEN ACCOUNTS
+      // SESSION STORAGE CLEANUP
+      safeRemoveStorage('syko_active_session', 'session');
       setUser(null); 
       setSessions([]);
       setMessages([]);
@@ -508,15 +510,10 @@ export default function App() {
       setAuthError(''); 
   };
   
-  // 🔥 DELETE SESSION HANDLER
   const handleDeleteSession = (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation(); // Parent click event'i tetikleme (Chati açma)
-    
-    // 1. Session listesinden çıkar
+    e.stopPropagation();
     const newSessions = sessions.filter(s => s.id !== sessionId);
     setSessions(newSessions);
-    
-    // 2. Eğer silinen session şu an açıksa, ekranı temizle
     if (currentSessionId === sessionId) {
         setMessages([]);
         setCurrentSessionId(null);
@@ -524,18 +521,16 @@ export default function App() {
   };
 
   const toggleVoiceInput = () => { if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return; } const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SpeechRecognition) return alert("Desteklenmiyor."); const rec = new SpeechRecognition(); rec.lang = 'tr-TR'; rec.onstart = () => setIsListening(true); rec.onend = () => setIsListening(false); rec.onresult = (e: any) => setInput(Array.from(e.results).map((r: any) => r[0].transcript).join('')); recognitionRef.current = rec; rec.start(); };
-  const toggleTheme = () => { const newTheme = theme === Theme.DARK ? Theme.LIGHT : Theme.DARK; setTheme(newTheme); document.documentElement.className = newTheme; localStorage.setItem('syko-theme', newTheme); };
+  const toggleTheme = () => { const newTheme = theme === Theme.DARK ? Theme.LIGHT : Theme.DARK; setTheme(newTheme); document.documentElement.className = newTheme; safeSetStorage('syko-theme', newTheme, 'local'); };
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (isListening && recognitionRef.current) { recognitionRef.current.stop(); setIsListening(false); }
     if ((!input.trim() && selectedImages.length === 0) || isTyping) return;
 
-    // --- CHECK LIMITS BEFORE ACTION ---
     if (isImageGenMode) {
       if (!checkLimits('imageGen')) return;
     } else {
-      // Normal chat OR vision
       if (selectedImages.length > 0) {
          if (!checkLimits('vision')) return;
       }
@@ -565,14 +560,12 @@ export default function App() {
       try {
         const result = await generateSykoImage(currentModel, currentInput, imagesToProcess);
         consumeLimit('imageGen');
-        // Image generation doesn't return text stream usually, just URL
         const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'model', content: result.text || "Görsel başarıyla oluşturuldu.", images: result.images, timestamp: Date.now() };
         setMessages(prev => [...prev, aiMsg]);
       } catch (error: any) {
         setToast({ message: error.message, type: 'error' });
       } finally {
         setIsTyping(false);
-        // Vision modunda kalmaya devam etsin mi? Kullanıcı "SykoLLM VISION" seçtiği için evet.
       }
       return;
     }
@@ -584,7 +577,6 @@ export default function App() {
       
       let hasConsumed = false;
       await streamResponse(currentModel, newMessages, (chunk) => {
-        // Only deduct on first successful chunk
         if (!hasConsumed) {
           consumeLimit('text');
           if (imagesToProcess.length > 0) consumeLimit('vision');
@@ -596,8 +588,8 @@ export default function App() {
        if (error.name === 'AbortError') return;
        setMessages(prev => prev.filter(m => m.content !== ''));
        
-       if (error.message.toLowerCase().includes('429') || error.message.toLowerCase().includes('quota')) {
-         setLimitError({show: true, msg: "API Kotası Aşıldı (429)"});
+       if (error.message.includes('429')) {
+         setLimitError({show: true, msg: "Google Sunucu Kotası Aşıldı (429). Lütfen kısa süre sonra tekrar deneyin."});
        } else {
          setToast({ message: error.message, type: 'error' });
        }
@@ -626,7 +618,7 @@ export default function App() {
              ) : (
                <div className="animate-fade-in space-y-6 text-sm text-gray-300">
                   <button onClick={() => setShowDetailedPolicy(false)} className="mb-4 flex items-center gap-2 text-white/50 hover:text-white text-xs font-bold uppercase tracking-widest transition-colors"><Icons.ChevronDown className="rotate-90" size={14}/> Geri Dön</button>
-                  <div className="prose prose-invert prose-sm max-w-none"><h3 className="text-white font-bold">1. Veri Toplama ve İşleme</h3><p>Verileriniz geçici olarak işlenir.</p><h3 className="text-white font-bold">2. Bakiye ve Ödemeler</h3><p>Kredi kartı bilgileri simülasyon amaçlıdır, gerçek çekim yapılmaz. Bakiye tarayıcı hafızasında saklanır.</p></div>
+                  <div className="prose prose-invert prose-sm max-w-none"><h3 className="text-white font-bold">1. Veri Toplama ve İşleme</h3><p>Verileriniz geçici olarak işlenir.</p><h3 className="text-white font-bold">2. Bakiye ve Ödemeler</h3><p>Kredi kartı bilgileri simülasyon amaçlıdır, gerçek çekim yapılmaz.</p></div>
                </div>
              )}
           </div>
@@ -665,10 +657,9 @@ export default function App() {
             </form>
             <div className="relative my-4"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-[#1a1a1a] px-2 text-white/30">veya</span></div></div>
             
-            {/* REAL GOOGLE BUTTON CONTAINER */}
             <div id="google-btn" className="flex justify-center google-btn-container min-h-[44px] w-full overflow-hidden mb-2" />
 
-            <div className="flex flex-col items-center"><button onClick={() => setShowLoginInfo(!showLoginInfo)} className="text-[10px] text-white/40 hover:text-white underline decoration-dotted decoration-white/20 hover:decoration-white transition-all flex items-center gap-1">Neden bunu görüyorum?<Icons.ChevronDown size={10} className={`transform transition-transform ${showLoginInfo ? 'rotate-180' : ''}`} /></button>{showLoginInfo && (<div className="mt-2 text-[10px] text-green-400 bg-green-500/10 px-3 py-2 rounded-lg border border-green-500/20 animate-slide-up w-full text-center">Yasal gereklilik ve kullanıcı güvenliği için.</div>)}</div>
+            <div className="flex flex-col items-center"><button onClick={() => setShowLoginInfo(!showLoginInfo)} className="text-[10px] text-white/40 hover:text-white underline decoration-dotted decoration-white/20 hover:decoration-white transition-all flex items-center gap-1">Neden bunu görüyorum?<Icons.ChevronDown size={10} className={`transform transition-transform ${showLoginInfo ? 'rotate-180' : ''}`} /></button>{showLoginInfo && (<div className="mt-2 text-[10px] text-green-400 bg-green-500/10 px-3 py-2 rounded-lg border border-green-500/20 animate-slide-up w-full text-center">Güvenlik: Oturumlarınız artık Session Storage ile korunmaktadır.</div>)}</div>
             {canShowDevButton && (<div className="flex flex-col items-center gap-3 animate-fade-in border-t border-white/10 pt-4 mt-4"><button onClick={handleDemoLogin} className="w-full bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-black font-bold font-mono text-xs px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 border border-green-500/20 hover:border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.1)] hover:shadow-[0_0_20px_rgba(34,197,94,0.4)] active:scale-95"><Icons.Terminal size={16} /><span>GELİŞTİRİCİ GİRİŞİ YAP</span></button></div>)}
           </div>
         </div>
@@ -676,7 +667,7 @@ export default function App() {
     );
   }
 
-  // --- VIEW 2: VERIFICATION (Existing Code) ---
+  // --- VIEW 2: VERIFICATION ---
   if (isVerifying) {
     const steps = [{ id: 1, name: "Edge / Gateway Authorization", detail: "Checking IP & Rate Limits...", icon: <Icons.Globe size={24} /> }, { id: 2, name: "Authentication Protocol", detail: "Validating Credentials...", icon: <Icons.Shield size={24} /> }, { id: 3, name: "Backend Security Sync", detail: "Establishing Handshake...", icon: <Icons.Lock size={24} /> }, { id: 4, name: "AI API Token Grant", detail: "Finalizing Session...", icon: <Icons.Cpu size={24} /> }];
     return (<div className="h-screen bg-black flex flex-col items-center justify-center p-6 text-white font-mono"><div className="w-full max-w-sm space-y-8"><div className="text-center space-y-2 mb-12"><h2 className="text-xl font-bold tracking-widest uppercase animate-pulse">Establishing Link</h2><p className="text-xs text-white/40">Routing through Syko Security Layers...</p></div><div className="space-y-6">{steps.map((step, i) => (<div key={step.id} className={`flex items-center gap-4 transition-all duration-500 transform ${verifyStep >= step.id ? 'opacity-100 translate-x-0' : 'opacity-20 translate-x-4'}`}><div className={`p-3 rounded-xl transition-colors duration-300 ${verifyStep > step.id ? 'bg-green-500 text-black shadow-[0_0_15px_rgba(34,197,94,0.6)]' : (verifyStep === step.id ? 'bg-white text-black animate-pulse' : 'bg-white/5 text-white/50')}`}>{step.icon}</div><div className="flex-1"><div className="flex justify-between items-center"><div className="text-[10px] uppercase opacity-40">Layer 0{step.id}</div>{verifyStep > step.id && <span className="text-green-500 text-[10px] font-bold tracking-wider">SECURE</span>}</div><div className="text-sm font-bold">{step.name}</div>{verifyStep === step.id && <div className="text-[10px] text-white/60 mt-1">{step.detail}</div>}</div></div>))}</div><div className="pt-12 text-center"><div className="h-1 w-full bg-white/10 rounded-full overflow-hidden"><div className="h-full bg-green-500 transition-all duration-1000 ease-linear" style={{width: `${(verifyStep/4)*100}%`}} /></div><div className="mt-2 text-[10px] text-white/30">{Math.min(100, Math.round((verifyStep/4)*100))}% COMPLETED</div></div></div></div>);
@@ -686,7 +677,6 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-white dark:bg-black text-black dark:text-white font-sans">
       
-      {/* 🔔 TOAST NOTIFICATION */}
       {toast && (
         <Toast 
           message={toast.message} 
@@ -695,7 +685,6 @@ export default function App() {
         />
       )}
 
-      {/* 🛑 LIMIT ERROR MODAL (Sadece Kota Dolduğunda) */}
       {limitError.show && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="bg-white dark:bg-syko-gray border border-black/10 dark:border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl animate-slide-up text-center relative overflow-hidden">
@@ -711,11 +700,9 @@ export default function App() {
         </div>
       )}
 
-      {/* 💰 SHOP MODAL */}
       {isShopOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl animate-fade-in">
            <div className="bg-syko-gray border border-white/10 w-full max-w-2xl rounded-3xl overflow-hidden flex flex-col max-h-[90vh]">
-              {/* Header */}
               <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black/40">
                 <div className="flex items-center gap-3">
                    <div className="p-2 bg-yellow-500/20 rounded-xl text-yellow-500"><Icons.Wallet size={24}/></div>
@@ -724,7 +711,6 @@ export default function App() {
                 <button onClick={() => setIsShopOpen(false)} className="p-2 hover:bg-white/10 rounded-full text-white"><Icons.Close size={20}/></button>
               </div>
 
-              {/* Balance Bar */}
               <div className="bg-gradient-to-r from-gray-900 to-black p-6 flex justify-between items-center border-b border-white/5">
                  <div>
                     <div className="text-[10px] uppercase font-bold text-white/40 tracking-wider mb-1">MEVCUT BAKİYE</div>
@@ -736,13 +722,11 @@ export default function App() {
                  </div>
               </div>
 
-              {/* Tabs */}
               <div className="flex p-2 gap-2 bg-black/20">
                  <button onClick={() => setShopTab('credits')} className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${shopTab === 'credits' ? 'bg-white text-black' : 'text-white/40 hover:bg-white/5'}`}>Kredi Satın Al</button>
                  <button onClick={() => setShopTab('deposit')} className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${shopTab === 'deposit' ? 'bg-green-600 text-white shadow-[0_0_15px_rgba(22,163,74,0.4)]' : 'text-white/40 hover:bg-white/5'}`}>Para Yükle</button>
               </div>
 
-              {/* Content */}
               <div className="p-6 flex-1 overflow-y-auto">
                  {shopTab === 'credits' ? (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -781,7 +765,6 @@ export default function App() {
         <div className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Sidebar */}
       <aside className={`fixed md:static inset-y-0 left-0 z-50 w-72 bg-gray-50 dark:bg-syko-dark border-r border-black/10 dark:border-white/10 transform transition-transform duration-300 flex flex-col ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="p-4 flex flex-col gap-4">
           <button onClick={() => {setMessages([]); setCurrentSessionId(null); setIsImageGenMode(false); setSidebarOpen(false);}} className="flex items-center gap-2 px-4 py-3 bg-white dark:bg-black border border-black/10 dark:border-white/10 rounded-xl hover:border-black/30 dark:hover:border-white/30 transition-all shadow-sm group">
@@ -790,7 +773,6 @@ export default function App() {
           </button>
         </div>
         
-        {/* Wallet Button */}
         <div className="px-4">
            <button onClick={() => setIsShopOpen(true)} className="w-full p-3 bg-gradient-to-r from-gray-900 to-black text-white rounded-xl border border-white/10 hover:border-yellow-500/50 transition-all flex items-center justify-between group shadow-lg">
               <div className="flex items-center gap-3">
@@ -813,7 +795,6 @@ export default function App() {
                   <span className="truncate max-w-[140px]">{s.title}</span>
               </div>
               
-              {/* DELETE BUTTON (Hover'da görünür) */}
               <button 
                 onClick={(e) => handleDeleteSession(e, s.id)}
                 className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-lg transition-all"
@@ -825,7 +806,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Donation & Profile */}
         <div className="p-4 border-t border-black/5 dark:border-white/5 space-y-2">
            <a href="#" onClick={(e) => {e.preventDefault(); alert("Bağış sistemi yakında aktif olacak!");}} className="flex items-center justify-center gap-2 w-full py-2 bg-pink-500/10 hover:bg-pink-500/20 text-pink-600 dark:text-pink-400 border border-pink-500/20 rounded-lg text-xs font-bold transition-all mb-2">
               <Icons.Heart size={14} className="fill-current"/> <span>Support Developer</span>
@@ -884,7 +864,6 @@ export default function App() {
                 ))}
               </div>
               
-              {/* --- GÜNCELLENEN ALAN: GOD MODE GÖSTERGESİ --- */}
               {user?.email === ADMIN_EMAIL ? (
                   <div className="mt-8 w-full max-w-md mx-auto animate-fade-in">
                      <div className="w-full text-center py-3 bg-green-500/10 border border-green-500/20 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.1)]">
@@ -938,7 +917,6 @@ export default function App() {
              )}
 
              <div className="relative group">
-                {/* Image Gen modunda dosya yüklemeyi devre dışı bırakabiliriz veya açık tutabiliriz, şimdilik açık. */}
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
                   const reader = new FileReader();
                   if (e.target.files?.[0]) {
@@ -947,7 +925,6 @@ export default function App() {
                   }
                 }} />
                 
-                {/* DÜZELTME: isImageGenMode olduğunda buton artık disabled DEĞİL. Rengi de mor oluyor. */}
                 <button onClick={() => fileInputRef.current?.click()} className={`absolute left-3 bottom-3 p-2 rounded-xl transition-colors z-10 ${isImageGenMode ? 'text-purple-600 hover:bg-purple-500/10' : 'text-black/50 dark:text-white/50 hover:bg-black/5 hover:text-black dark:hover:text-white'}`}><Icons.Plus size={18} /></button>
                 
                 <div className="absolute left-12 bottom-3 z-20" ref={menuRef}>
