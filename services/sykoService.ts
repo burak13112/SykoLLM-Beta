@@ -85,8 +85,8 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   // 2. GOOGLE IMAGEN 3 İLE GÖRSEL ÜRETİMİ
   // Pollinations yok. Direkt Google sunucularına istek atıyoruz.
   try {
-      // Imagen 3 endpoint
-      const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${geminiKey}`, {
+      // Imagen 3 endpoint -> VERSİYON GÜNCELLENDİ: 002
+      const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${geminiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -106,7 +106,7 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
           
           // Eğer 404 ise muhtemelen API key Imagen 3 için yetkili değildir veya model adı yanlıştır.
           if (imagenResponse.status === 404) {
-              throw new Error("Imagen 3 modeli bu API anahtarında bulunamadı. Lütfen Google AI Studio'da Imagen 3 erişiminiz olduğundan emin olun.");
+              throw new Error("Imagen 3.0 (002) modeli bu API anahtarında bulunamadı. Lütfen Google AI Studio'da doğru modele erişiminiz olduğundan emin olun.");
           }
           throw new Error(`Google Image Gen Error: ${imagenResponse.statusText}`);
       }
@@ -120,7 +120,7 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
           const imageUrl = `data:${mimeType};base64,${base64Image}`;
           
           return {
-              text: `**Imagen 3** tarafından oluşturuldu.\n\n*Prompt: ${finalPrompt}*`,
+              text: `**Imagen 3.0** tarafından oluşturuldu.\n\n*Prompt: ${finalPrompt}*`,
               images: [imageUrl]
           };
       } else {
