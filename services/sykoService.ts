@@ -23,131 +23,159 @@ const SYSTEM_PROMPTS: Record<string, string> = {
   'syko-coder': `You are SykoLLM Coder. Expert developer. ${SYNTHETIC_THINKING_PROMPT}`
 };
 
+// 🛠️ YARDIMCI FONKSİYON: Base64 Temizleyici
+const extractBase64Data = (dataUrl: string) => {
+  const matches = dataUrl.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+  if (!matches || matches.length !== 3) {
+    return { mimeType: 'image/jpeg', data: '' };
+  }
+  return { mimeType: matches[1], data: matches[2] };
+};
+
 // ============================================================================
-// 🎨 SYKO VISION (IMAGE GENERATION & REMIX) SERVICE
+// 🎨 SYKO VISION (GOOGLE IMAGEN 3 POWERED)
 // ============================================================================
 export const generateSykoImage = async (modelId: string, prompt: string, referenceImages?: string[]): Promise<{ text: string, images: string[] }> => {
   
   // UX Gecikmesi
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  await new Promise(resolve => setTimeout(resolve, 500));
 
-  // 1. ANAHTAR AYRIMI:
-  const enhancerApiKey = process.env.API_KEY1 || process.env.API_KEY || "";
-  const pollinationsToken = process.env.API_KEY4 || "";
+  // 🔑 GEMINI API KEY (Google AI Studio)
+  const geminiKey = process.env.API_KEY4 || ""; 
+  
+  if (!geminiKey) {
+      throw new Error("API_KEY4 eksik! Görsel üretimi için Google AI Studio anahtarı gerekli.");
+  }
 
   let finalPrompt = prompt;
-  let responseText = `Generated visual asset based on: "${prompt}"`;
+  let responseText = `Generated with Google Imagen 3 based on: "${prompt}"`;
 
-  // 🖼️ IMAGE-TO-IMAGE (REMIX) MANTIĞI
-  // Burası görsel ÜRETMEZ, sadece senin yüklediğin resmi anali edip yeni prompt yazar.
-  // Üretimi aşağıda Pollinations yapacak.
-  if (referenceImages && referenceImages.length > 0) {
-     try {
-        const remixResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${enhancerApiKey}`,
-              "Content-Type": "application/json",
-              "HTTP-Referer": window.location.href,
-              "X-Title": "SykoLLM Web Remix"
-            },
-            body: JSON.stringify({
-              model: "google/gemini-2.0-flash-lite-preview-02-05:free",
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    { 
-                      type: "text", 
-                      text: `I want to generate a new image based on this image. 
-                      Describe this image in extreme visual detail (colors, composition, subject). 
-                      Then, apply this modification request to the description: "${prompt}".
-                      Output ONLY the final detailed prompt for an image generator (like Flux/Midjourney). Do not add any conversational text.` 
-                    },
-                    { type: "image_url", image_url: { url: referenceImages[0] } }
-                  ]
-                }
-              ]
-            })
-        });
+  // 1. GEMINI İLE PROMPT GÜÇLENDİRME (Prompt Engineering)
+  // Kullanıcının kısa isteğini Imagen 3'ün anlayacağı süper detaylı hale getiriyoruz.
+  try {
+      const enhancementResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+              contents: [{
+                  parts: [{
+                      text: `You are an expert AI Art Director. 
+                      Rewrite this user prompt into a highly detailed, descriptive prompt suitable for the 'Imagen 3' image generation model.
+                      Include details about lighting, style (photorealistic, cinematic, oil painting, etc.), composition, and colors.
+                      USER PROMPT: "${prompt}"
+                      Output ONLY the raw English prompt. Do not add introductions.`
+                  }]
+              }]
+          })
+      });
 
-        if (remixResponse.ok) {
-            const data = await remixResponse.json();
-            const enhancedPrompt = data.choices?.[0]?.message?.content;
-            if (enhancedPrompt) {
-                finalPrompt = enhancedPrompt;
-                responseText = `Remixed visual asset based on reference and: "${prompt}"`;
-            }
-        }
-     } catch (e) {
-         console.warn("Remix enhancement failed, falling back to raw prompt.", e);
-     }
+      if (enhancementResponse.ok) {
+          const data = await enhancementResponse.json();
+          const enhancedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (enhancedText) {
+              console.log("Original Prompt:", prompt);
+              console.log("Enhanced Prompt:", enhancedText);
+              finalPrompt = enhancedText.trim();
+          }
+      }
+  } catch (e) {
+      console.warn("Prompt enhancement failed, using raw prompt.", e);
   }
 
-  // Prompt'u URL için hazırla
-  const encodedPrompt = encodeURIComponent(finalPrompt + " high quality, detailed, masterpiece, 8k");
-  const randomSeed = Math.floor(Math.random() * 1000000);
-  
-  // POLLINATIONS MODELLERİ (Ekran Görüntüsündekiler)
-  // flux -> Flux Schnell
-  // zimage -> Z-Image Turbo
-  // turbo -> SDXL Turbo
-  const models = ['flux', 'zimage', 'turbo'];
-  const randomModel = models[Math.floor(Math.random() * models.length)];
+  // 2. GOOGLE IMAGEN 3 İLE GÖRSEL ÜRETİMİ
+  // Pollinations yok. Direkt Google sunucularına istek atıyoruz.
+  try {
+      // Imagen 3 endpoint
+      const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${geminiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+              instances: [
+                  { prompt: finalPrompt }
+              ],
+              parameters: {
+                  sampleCount: 1,
+                  aspectRatio: "1:1" // Kare format, isteğe göre değiştirilebilir
+              }
+          })
+      });
 
-  // URL OLUŞTURMA
-  let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&model=${randomModel}&seed=${randomSeed}&nologo=true`;
-  
-  // Eğer özel Pollinations Key (API_KEY4) varsa URL'ye ekle
-  if (pollinationsToken) {
-      imageUrl += `&token=${pollinationsToken}&private=true`; 
+      if (!imagenResponse.ok) {
+          const errText = await imagenResponse.text();
+          console.error("Imagen API Error:", errText);
+          
+          // Eğer 404 ise muhtemelen API key Imagen 3 için yetkili değildir veya model adı yanlıştır.
+          if (imagenResponse.status === 404) {
+              throw new Error("Imagen 3 modeli bu API anahtarında bulunamadı. Lütfen Google AI Studio'da Imagen 3 erişiminiz olduğundan emin olun.");
+          }
+          throw new Error(`Google Image Gen Error: ${imagenResponse.statusText}`);
+      }
+
+      const data = await imagenResponse.json();
+      
+      // Imagen Base64 döner. Bunu Data URL'e çevirmemiz lazım.
+      if (data.predictions && data.predictions.length > 0) {
+          const base64Image = data.predictions[0].bytesBase64Encoded;
+          const mimeType = data.predictions[0].mimeType || "image/png";
+          const imageUrl = `data:${mimeType};base64,${base64Image}`;
+          
+          return {
+              text: `**Imagen 3** tarafından oluşturuldu.\n\n*Prompt: ${finalPrompt}*`,
+              images: [imageUrl]
+          };
+      } else {
+          throw new Error("Görsel oluşturulamadı (Boş yanıt).");
+      }
+
+  } catch (error: any) {
+      console.error("Görsel Üretim Hatası:", error);
+      throw new Error("Görsel oluşturulamadı: " + error.message);
   }
-
-  return {
-    text: responseText,
-    images: [imageUrl]
-  };
 };
 
 // ============================================================================
-// 👁️ VISION BRIDGE (The "Sneaky" Image Analyst)
+// 👁️ VISION BRIDGE (Doğrudan Google Gemini API)
 // ============================================================================
 const getVisionDescription = async (imageUrl: string): Promise<string> => {
     try {
-        const visionApiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+        // 🔑 GEMINI API KEY (Google AI Studio)
+        const geminiKey = process.env.API_KEY4 || "";
         
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        if (!geminiKey) return "Vision API Key (API_KEY4) is missing.";
+
+        const { mimeType, data } = extractBase64Data(imageUrl);
+
+        // Doğrudan Google API'sine istek (OpenRouter değil)
+        // Gemini 2.0 Flash ücretsiz ve çok hızlıdır.
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
             method: "POST",
-            headers: {
-                "Authorization": `Bearer ${visionApiKey}`,
-                "Content-Type": "application/json",
-                "HTTP-Referer": window.location.href,
-                "X-Title": "SykoLLM Vision Bridge"
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                model: "google/gemini-2.0-flash-lite-preview-02-05:free",
-                messages: [
-                    {
-                        role: "user",
-                        content: [
-                            { type: "text", text: "Analyze this image in extreme detail. Describe every object, text, color, layout, and context visible. Output ONLY the description, nothing else." },
-                            { type: "image_url", image_url: { url: imageUrl } }
-                        ]
-                    }
-                ]
+                contents: [{
+                    parts: [
+                        { text: "Analyze this image in extreme detail. Describe every object, text, color, layout, and context visible. Be precise." },
+                        { inline_data: { mime_type: mimeType, data: data } }
+                    ]
+                }]
             })
         });
 
-        if (!response.ok) return "Image analysis failed due to server load.";
-        const data = await response.json();
-        return data.choices?.[0]?.message?.content || "No description generated.";
+        if (!response.ok) {
+            console.error("Gemini Vision API Error:", await response.text());
+            return "Image analysis failed via Google Gemini API.";
+        }
+
+        const resData = await response.json();
+        return resData.candidates?.[0]?.content?.parts?.[0]?.text || "No description generated.";
+
     } catch (e) {
-        return "System error during image analysis.";
+        console.error(e);
+        return "System error during Gemini image analysis.";
     }
 };
 
 // ============================================================================
-// 🚀 OPENROUTER STREAMING SERVICE
+// 🚀 OPENROUTER STREAMING SERVICE (Sohbet Modelleri)
 // ============================================================================
 
 export const streamResponse = async (
@@ -162,6 +190,7 @@ export const streamResponse = async (
   let apiKey = "";
   let systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
 
+  // Sadece SOHBET modelleri OpenRouter kullanır
   switch (modelId) {
     case 'syko-v2.5':
       openRouterModel = "meta-llama/llama-3.3-70b-instruct:free";
@@ -196,25 +225,24 @@ export const streamResponse = async (
   let finalUserContent = lastMsg.content;
   let useVisionBridge = false;
 
-  // 🌉 VISION BRIDGE LOGIC
+  // 🌉 VISION BRIDGE LOGIC (Resimli Sohbet)
+  // Eğer kullanıcı resim attıysa, model ne olursa olsun resmi GEMINI (API_KEY4) ile okuyoruz.
   if (images && images.length > 0) {
-      if (modelId === 'syko-v2.5' || modelId === 'syko-super-pro' || modelId === 'syko-coder') {
-          console.log(`[SykoLLM System] Vision Bridge Activated for ${modelId}. Analyzing image first...`);
-          
-          const imageDescription = await getVisionDescription(images[0]);
-          
-          finalUserContent = `[SYSTEM INSTRUCTION: The user has attached an image. Since you cannot see images directly, an external Vision AI has analyzed it for you. Here is the description of the image:]
-          
-          --- START OF IMAGE DESCRIPTION ---
-          ${imageDescription}
-          --- END OF IMAGE DESCRIPTION ---
-          
-          [USER REQUEST BASED ON THIS IMAGE]:
-          ${lastMsg.content}
-          `;
+      console.log(`[SykoLLM System] Vision Bridge Activated using Google Gemini (API_KEY4)...`);
+      
+      const imageDescription = await getVisionDescription(images[0]);
+      
+      finalUserContent = `[SYSTEM INSTRUCTION: The user has attached an image. Since you cannot see images directly, an external Google Gemini Vision AI has analyzed it for you. Here is the description of the image:]
+      
+      --- START OF IMAGE DESCRIPTION ---
+      ${imageDescription}
+      --- END OF IMAGE DESCRIPTION ---
+      
+      [USER REQUEST BASED ON THIS IMAGE]:
+      ${lastMsg.content}
+      `;
 
-          useVisionBridge = true;
-      }
+      useVisionBridge = true;
   }
 
   if (!apiKey) throw new Error(`API Anahtarı eksik! (${modelId}). Lütfen .env dosyasını kontrol et.`);
@@ -228,13 +256,9 @@ export const streamResponse = async (
     });
   }
 
-  if (images && images.length > 0 && !useVisionBridge) {
-    const contentArray: any[] = [{ type: "text", text: finalUserContent }];
-    images.forEach(img => contentArray.push({ type: "image_url", image_url: { url: img } }));
-    messages.push({ role: "user", content: contentArray });
-  } else {
-    messages.push({ role: "user", content: finalUserContent });
-  }
+  // Vision Bridge kullanılıyorsa, dönüştürülmüş metni yolla.
+  // Kullanılmıyorsa (resim yoksa) normal metni yolla.
+  messages.push({ role: "user", content: finalUserContent });
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
