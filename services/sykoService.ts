@@ -166,13 +166,13 @@ export const streamResponse = async (
       break;
       
     case 'syko-super-pro':
-      openRouterModel = "deepseek/deepseek-r1:free"; 
+      openRouterModel = "deepseek/deepseek-r1-0528:free"; 
       apiKey = process.env.API_KEY2 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-super-pro'];
       break;
       
     case 'syko-coder':
-      openRouterModel = "qwen/qwen-2.5-coder-32b-instruct:free";
+      openRouterModel = "kwaipilot/kat-coder-pro:free";
       apiKey = process.env.API_KEY3 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-coder'];
       break;
