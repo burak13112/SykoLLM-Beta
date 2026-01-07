@@ -113,7 +113,7 @@ const getVisionDescription = async (imageUrl: string): Promise<string> => {
                 "X-Title": "SykoLLM Vision Bridge"
             },
             body: JSON.stringify({
-                model: "google/gemma-3-27b-it:free", // En güçlü vision modeli
+                model: "google/gemini-2.0-pro-exp-02-05:free", // En güçlü vision modeli
                 messages: [
                     {
                         role: "user",
