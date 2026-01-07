@@ -28,13 +28,36 @@ const SYSTEM_PROMPTS: Record<string, string> = {
   'syko-coder': `You are SykoLLM Coder. Expert developer. ${SYNTHETIC_THINKING_PROMPT}`
 };
 
+// ============================================================================
+// 🎨 SYKO VISION (IMAGE GENERATION) SERVICE
+// ============================================================================
+// Not: OpenRouter üzerindeki image gen modelleri (text-to-image) genellikle
+// ücretli veya belirli kısıtlamalara tabidir. "Ücretsiz" ve "Basit" bir çözüm için
+// burada Pollinations AI (Flux Model) kullanıyoruz. Tamamen ücretsiz ve hızlıdır.
 export const generateSykoImage = async (modelId: string, prompt: string, referenceImages?: string[]): Promise<{ text: string, images: string[] }> => {
-  throw new Error("Görsel üretim servisi bakım modundadır. Lütfen Chat modunu kullanın.");
+  
+  // Basit bir gecikme simülasyonu (UX için)
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  // Prompt'u URL için hazırla
+  const encodedPrompt = encodeURIComponent(prompt + " high quality, detailed, masterpiece");
+  const randomSeed = Math.floor(Math.random() * 100000);
+  
+  // Pollinations Flux Model URL
+  const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&model=flux&seed=${randomSeed}&nologo=true`;
+
+  return {
+    text: `Generated visual asset based on: "${prompt}"`,
+    images: [imageUrl]
+  };
 };
 
 // ============================================================================
-// 🚀 OPENROUTER STREAMING SERVICE
+// 🚀 OPENROUTER STREAMING SERVICE (PURE FETCH)
 // ============================================================================
+// Not: Bu fonksiyon Client-Side çalışıyor. Güvenliği tam sağlamak için
+// bu logic ileride bir Backend API Route'a (örn: /api/chat) taşınmalıdır.
+// Şu anlık Frontend üzerinden OpenRouter API'sine güvenli bağlantı simüle ediyoruz.
 
 export const streamResponse = async (
   modelId: string, 
@@ -48,39 +71,40 @@ export const streamResponse = async (
   let apiKey = "";
   let systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
 
+  // Model ID Eşleştirmeleri
   switch (modelId) {
     case 'syko-v2.5':
-      openRouterModel = "meta-llama/llama-3.3-70b-instruct:free";
+      openRouterModel = "meta-llama/llama-3.3-70b-instruct:free"; // Ücretsiz ve hızlı
       apiKey = process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
       break;
     case 'syko-v3-pro':
-      openRouterModel = "mistralai/devstral-2512:free"; 
-      apiKey = process.env.API_KEY1 || "";
+      openRouterModel = "xiaomi/mimo-v2-flash:free"; // Dengeli
+      apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
     case 'syko-super-pro':
       // DeepSeek R1 native reasoning kullanır
       openRouterModel = "deepseek/deepseek-r1:free"; 
-      apiKey = process.env.API_KEY2 || "";
+      apiKey = process.env.API_KEY2 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-super-pro'];
       break;
     case 'syko-coder':
       openRouterModel = "qwen/qwen-2.5-coder-32b-instruct:free";
-      apiKey = process.env.API_KEY3 || "";
+      apiKey = process.env.API_KEY3 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-coder'];
       break;
     default:
-      throw new Error("Geçersiz Model ID");
+      // Fallback
+      openRouterModel = "meta-llama/llama-3.3-70b-instruct:free";
+      apiKey = process.env.API_KEY || "";
   }
 
-  if (!apiKey) throw new Error(`API Anahtarı eksik! (${modelId})`);
+  if (!apiKey) throw new Error(`API Anahtarı eksik! (${modelId}). Lütfen .env dosyasını kontrol et.`);
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
 
   // 💉 FEW-SHOT INJECTION SADECE ZORLAMA MODELLER İÇİN
-  // DeepSeek R1 (Super Pro) için bunu yapmıyoruz, kafası karışıyor.
-  // Sadece V3 Pro ve Coder gibi "sonradan akıllanan" modellere örnek veriyoruz.
   if (modelId === 'syko-v3-pro' || modelId === 'syko-coder') {
       messages.push({ 
           role: "user", 
@@ -122,7 +146,7 @@ export const streamResponse = async (
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": window.location.href,
+        "HTTP-Referer": window.location.href, // OpenRouter istatistikleri için
         "X-Title": "SykoLLM Web"
       },
       body: JSON.stringify({
@@ -130,12 +154,16 @@ export const streamResponse = async (
         messages: messages,
         stream: true,
         temperature: 0.6,
-        include_reasoning: true // Bu flag DeepSeek R1 için kritiktir.
+        include_reasoning: true // DeepSeek R1 için kritik
       }),
       signal: signal
     });
 
-    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    if (!response.ok) {
+        const errorData = await response.text();
+        console.error("OpenRouter API Error:", errorData);
+        throw new Error(`API Error: ${response.status} - ${response.statusText}`);
+    }
     if (!response.body) throw new Error("Empty response body");
 
     const reader = response.body.getReader();
@@ -164,8 +192,7 @@ export const streamResponse = async (
           
           if (!delta) continue;
 
-          // 1. NATIVE REASONING (DeepSeek R1 / Super Pro)
-          // Bu kısım "include_reasoning: true" sayesinde gelir.
+          // 1. NATIVE REASONING (DeepSeek R1)
           const reasoningChunk = delta.reasoning; 
           
           if (reasoningChunk) {
@@ -193,6 +220,7 @@ export const streamResponse = async (
       }
     }
     
+    // Eğer akış bittiğinde hala think etiketi açıksa kapat
     if (hasStartedThinking && !hasFinishedThinking) {
         onChunk("</think>");
     }
@@ -201,6 +229,7 @@ export const streamResponse = async (
 
   } catch (error: any) {
     if (error.name === 'AbortError') return "[ABORTED]";
+    console.error("Stream Error:", error);
     throw new Error(error.message || "Bağlantı hatası.");
   }
 };

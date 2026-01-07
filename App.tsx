@@ -45,6 +45,13 @@ const MODELS: ModelConfig[] = [
     description: 'Specialized for programming tasks, debugging, and code generation.', 
     supportsImages: false 
   },
+  {
+    id: 'syko-vision',
+    name: 'SykoLLM VISION',
+    tag: 'CREATOR',
+    description: 'Our advanced visual generation engine. Transforms text prompts into high-fidelity visual assets.',
+    supportsImages: false // Bu model görsel ÜRETİR, görsel okumaz.
+  }
 ];
 
 // 🔒 GÜVENLİK AYARLARI
@@ -56,7 +63,8 @@ const LIMITS = {
   v25: { text: 20, imageGen: 2, vision: 2 },
   pro: { text: 15, imageGen: 1, vision: 1 },
   super: { text: 3, imageGen: 1, vision: 1 },
-  coder: { text: 5, imageGen: 0, vision: 0 }
+  coder: { text: 5, imageGen: 0, vision: 0 },
+  vision: { text: 0, imageGen: 5, vision: 0 } // Vision modeli için limitler
 };
 
 const PACKAGES = [
@@ -71,17 +79,25 @@ const DEFAULT_USAGE: DailyUsage = {
   v25: { text: 0, imageGen: 0, vision: 0 },
   pro: { text: 0, imageGen: 0, vision: 0 },
   super: { text: 0, imageGen: 0, vision: 0 },
-  coder: { text: 0, imageGen: 0, vision: 0 }
+  coder: { text: 0, imageGen: 0, vision: 0 },
+  vision: { text: 0, imageGen: 0, vision: 0 }
 };
 
 export default function App() {
-  // Privacy State
-  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  // Privacy State - LAZY INIT (F5 Oturum Koruma)
+  const [privacyAccepted, setPrivacyAccepted] = useState(() => {
+    return localStorage.getItem('syko_privacy_consent') === 'true';
+  });
+  
   const [privacyCheckbox, setPrivacyCheckbox] = useState(false);
   const [showDetailedPolicy, setShowDetailedPolicy] = useState(false);
 
-  // Auth State
-  const [user, setUser] = useState<{name: string, email: string, picture: string} | null>(null);
+  // Auth State - LAZY INIT (F5 Oturum Koruma)
+  const [user, setUser] = useState<{name: string, email: string, picture: string} | null>(() => {
+    const savedUser = localStorage.getItem('syko_active_user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyStep, setVerifyStep] = useState(0);
 
@@ -139,7 +155,16 @@ export default function App() {
   const menuRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // --- GOOGLE AUTH HELPERS ---
+  // Vision Modu Kontrolü
+  useEffect(() => {
+    if (currentModel === 'syko-vision') {
+      setIsImageGenMode(true);
+    } else {
+      setIsImageGenMode(false);
+    }
+  }, [currentModel]);
+
+  // --- GOOGLE AUTH HELPERS (GERÇEK) ---
   const renderGoogleButton = () => {
     const btn = document.getElementById('google-btn');
     if (btn && window.google) {
@@ -161,41 +186,22 @@ export default function App() {
     try { 
       const payload = JSON.parse(atob(response.credential.split('.')[1])); 
       const googleUser = { name: payload.name, email: payload.email, picture: payload.picture };
+      
+      // Kullanıcıyı State'e ve LocalStorage'a kaydet (Persistence)
       setUser(googleUser); 
       localStorage.setItem('syko_active_user', JSON.stringify(googleUser));
+      
       startVerificationSequence(); 
     } catch (e) { 
-      // Fallback
+      setToast({ message: "Google Giriş Hatası", type: "error" });
     } 
   };
 
   // Initialize
   useEffect(() => {
-    // Check Privacy Consent
-    const consent = localStorage.getItem('syko_privacy_consent');
-    if (consent === 'true') setPrivacyAccepted(true);
-
-    // Load Active User (Persistence)
-    const storedActiveUser = localStorage.getItem('syko_active_user');
-    if (storedActiveUser) {
-        setUser(JSON.parse(storedActiveUser));
-    }
-
-    // Load Wallet & Usage
+    // Load Wallet
     const storedWallet = localStorage.getItem('syko_wallet');
     if (storedWallet) setWallet(JSON.parse(storedWallet));
-
-    const storedUsage = localStorage.getItem('syko_usage');
-    if (storedUsage) {
-      const parsedUsage = JSON.parse(storedUsage);
-      const today = new Date().toISOString().split('T')[0];
-      if (parsedUsage.date !== today) {
-        setUsage({ ...DEFAULT_USAGE, date: today });
-      } else {
-        // Ensure structure compatibility if updated
-        setUsage({ ...DEFAULT_USAGE, ...parsedUsage });
-      }
-    }
 
     const savedTheme = localStorage.getItem('syko-theme') as Theme;
     if (savedTheme) {
@@ -219,11 +225,17 @@ export default function App() {
     };
     checkAdminAccess();
 
-    // Init Google Auth
+    // Init Google Auth (REAL)
     const initGoogle = () => {
       if (window.google) {
+        const clientID = process.env.GOOGLE_CLIENT_ID;
+        
+        if (!clientID || clientID.includes("BURAYA")) {
+           console.warn("UYARI: Google Client ID tanımlı değil. Google girişi çalışmayacaktır.");
+        }
+
         window.google.accounts.id.initialize({
-          client_id: "721151475753-41v2k5b1f7a8f1f7a8f1f7a8.apps.googleusercontent.com",
+          client_id: clientID, // Burası artık vite.config.ts'den geliyor
           callback: handleGoogleLogin,
           auto_select: false,
           cancel_on_tap_outside: false
@@ -254,10 +266,61 @@ export default function App() {
     }
   }, [privacyAccepted, user, authMode]);
 
-  // Sync Persistence
+  // 🔄 IDENTITY-BASED USAGE SYNC
+  useEffect(() => {
+    if (user && user.email) {
+        const userUsageKey = `syko_usage_${user.email}`;
+        const storedUsage = localStorage.getItem(userUsageKey);
+        
+        if (storedUsage) {
+            const parsedUsage = JSON.parse(storedUsage);
+            const today = new Date().toISOString().split('T')[0];
+            if (parsedUsage.date !== today) {
+                setUsage({ ...DEFAULT_USAGE, date: today });
+            } else {
+                setUsage({ ...DEFAULT_USAGE, ...parsedUsage });
+            }
+        } else {
+            setUsage(DEFAULT_USAGE);
+        }
+    }
+  }, [user]);
+
+  // 💾 PERSISTENCE EFFECTS
   useEffect(() => { localStorage.setItem('syko_wallet', JSON.stringify(wallet)); }, [wallet]);
-  useEffect(() => { localStorage.setItem('syko_usage', JSON.stringify(usage)); }, [usage]);
+  
+  useEffect(() => { 
+      if (user && user.email) {
+          const userUsageKey = `syko_usage_${user.email}`;
+          localStorage.setItem(userUsageKey, JSON.stringify(usage)); 
+      }
+  }, [usage, user]);
+  
   useEffect(() => { localStorage.setItem('syko-sessions', JSON.stringify(sessions)); }, [sessions]);
+
+  // 🔄 SOHBET GEÇMİŞİNİ OTOMATİK KAYDET (AUTO-SYNC SESSIONS)
+  useEffect(() => {
+    if (!user || messages.length === 0) return;
+
+    if (currentSessionId) {
+      setSessions(prev => prev.map(s => 
+        s.id === currentSessionId 
+          ? { ...s, messages: messages, title: (s.title === "New Chat" && messages.length > 0) ? messages[0].content.slice(0, 30) : s.title } 
+          : s
+      ));
+    } else {
+      const newId = Date.now().toString();
+      const newSession: ChatSession = {
+        id: newId,
+        title: messages[0].content.slice(0, 30) || "New Conversation",
+        messages: messages,
+        createdAt: Date.now()
+      };
+      setSessions(prev => [newSession, ...prev]);
+      setCurrentSessionId(newId);
+    }
+  }, [messages]);
+
 
   // UI Effects
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isTyping, selectedImages]);
@@ -272,7 +335,6 @@ export default function App() {
 
   // --- 🚦 LIMIT CONTROLLER ---
   const checkLimits = (action: 'text' | 'imageGen' | 'vision'): boolean => {
-    // 🔓 ADMIN GOD MODE: Eğer Geliştirici ise limit yok.
     if (user?.email === ADMIN_EMAIL) return true;
 
     const today = new Date().toISOString().split('T')[0];
@@ -281,16 +343,22 @@ export default function App() {
       return true;
     }
 
-    let modelKey: 'v25' | 'pro' | 'super' | 'coder' = 'v25';
+    let modelKey: any = 'v25';
     if (currentModel === 'syko-v3-pro') modelKey = 'pro';
     if (currentModel === 'syko-super-pro') modelKey = 'super';
     if (currentModel === 'syko-coder') modelKey = 'coder';
+    if (currentModel === 'syko-vision') modelKey = 'vision'; // Limitlerde vision key'i yoksa patlar, ekledik mi? Evet.
 
-    const currentUsage = usage[modelKey][action];
-    const maxLimit = LIMITS[modelKey][action];
+    // Typescript trick for dynamic key
+    const limitsAny = LIMITS as any;
+    const usageAny = usage as any;
+
+    if (!usageAny[modelKey]) return true; // Eğer model limitlerde tanımlı değilse geç
+
+    const currentUsage = usageAny[modelKey][action];
+    const maxLimit = limitsAny[modelKey] ? limitsAny[modelKey][action] : 10;
 
     if (currentUsage >= maxLimit) {
-      // Check for extra credits ONLY for text messages on PRO/SUPER (optional logic)
       if (action === 'text' && (modelKey === 'pro' || modelKey === 'super') && wallet.proCredits > 0) {
           return true;
       }
@@ -308,29 +376,29 @@ export default function App() {
   };
 
   const consumeLimit = (action: 'text' | 'imageGen' | 'vision') => {
-    // 🔓 ADMIN GHOST MODE: Geliştirici kotadan yemez.
     if (user?.email === ADMIN_EMAIL) return;
 
     const today = new Date().toISOString().split('T')[0];
-    let newUsage = { ...usage };
+    let newUsage: any = { ...usage };
 
     if (newUsage.date !== today) {
       newUsage = { ...DEFAULT_USAGE, date: today };
     }
 
-    let modelKey: 'v25' | 'pro' | 'super' | 'coder' = 'v25';
+    let modelKey = 'v25';
     if (currentModel === 'syko-v3-pro') modelKey = 'pro';
     if (currentModel === 'syko-super-pro') modelKey = 'super';
     if (currentModel === 'syko-coder') modelKey = 'coder';
+    if (currentModel === 'syko-vision') modelKey = 'vision';
 
-    // Consume logic
-    if (action === 'text' && (modelKey === 'pro' || modelKey === 'super') && newUsage[modelKey].text >= LIMITS[modelKey].text) {
-        // Use wallet credits if daily limit reached
+    if (action === 'text' && (modelKey === 'pro' || modelKey === 'super') && newUsage[modelKey].text >= (LIMITS as any)[modelKey].text) {
         if (wallet.proCredits > 0) {
             setWallet(prev => ({...prev, proCredits: prev.proCredits - 1}));
         }
     } else {
-        newUsage[modelKey][action] += 1;
+        if (newUsage[modelKey]) {
+           newUsage[modelKey][action] += 1;
+        }
     }
     
     setUsage(newUsage);
@@ -445,13 +513,14 @@ export default function App() {
       try {
         const result = await generateSykoImage(currentModel, currentInput, imagesToProcess);
         consumeLimit('imageGen');
-        const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'model', content: result.text || "Generated:", images: result.images, timestamp: Date.now() };
+        // Image generation doesn't return text stream usually, just URL
+        const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'model', content: result.text || "Görsel başarıyla oluşturuldu.", images: result.images, timestamp: Date.now() };
         setMessages(prev => [...prev, aiMsg]);
       } catch (error: any) {
         setToast({ message: error.message, type: 'error' });
       } finally {
         setIsTyping(false);
-        setIsImageGenMode(false);
+        // Vision modunda kalmaya devam etsin mi? Kullanıcı "SykoLLM VISION" seçtiği için evet.
       }
       return;
     }
@@ -486,7 +555,7 @@ export default function App() {
     }
   };
 
-  // --- VIEW 0: PRIVACY (Existing Code) ---
+  // --- VIEW 0: PRIVACY ---
   if (!privacyAccepted) {
      return (
       <div className="fixed inset-0 z-[1000] bg-black flex items-center justify-center p-4 backdrop-blur-3xl">
@@ -518,7 +587,7 @@ export default function App() {
     );
   }
 
-  // --- VIEW 1: LOGIN (Existing Code) ---
+  // --- VIEW 1: LOGIN ---
   if (!user) {
     return (
       <div className="h-screen flex flex-col items-center justify-center p-4 text-white overflow-hidden relative bg-black">
@@ -543,7 +612,10 @@ export default function App() {
               <button type="submit" className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-gray-200 transition-colors mt-1 text-sm">{authMode === 'login' ? 'GİRİŞ YAP' : 'HESAP OLUŞTUR'}</button>
             </form>
             <div className="relative my-4"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div><div className="relative flex justify-center text-xs uppercase"><span className="bg-[#1a1a1a] px-2 text-white/30">veya</span></div></div>
+            
+            {/* REAL GOOGLE BUTTON CONTAINER */}
             <div id="google-btn" className="flex justify-center google-btn-container min-h-[44px] w-full overflow-hidden mb-2" />
+
             <div className="flex flex-col items-center"><button onClick={() => setShowLoginInfo(!showLoginInfo)} className="text-[10px] text-white/40 hover:text-white underline decoration-dotted decoration-white/20 hover:decoration-white transition-all flex items-center gap-1">Neden bunu görüyorum?<Icons.ChevronDown size={10} className={`transform transition-transform ${showLoginInfo ? 'rotate-180' : ''}`} /></button>{showLoginInfo && (<div className="mt-2 text-[10px] text-green-400 bg-green-500/10 px-3 py-2 rounded-lg border border-green-500/20 animate-slide-up w-full text-center">Yasal gereklilik ve kullanıcı güvenliği için.</div>)}</div>
             {canShowDevButton && (<div className="flex flex-col items-center gap-3 animate-fade-in border-t border-white/10 pt-4 mt-4"><button onClick={handleDemoLogin} className="w-full bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-black font-bold font-mono text-xs px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 border border-green-500/20 hover:border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.1)] hover:shadow-[0_0_20px_rgba(34,197,94,0.4)] active:scale-95"><Icons.Terminal size={16} /><span>GELİŞTİRİCİ GİRİŞİ YAP</span></button></div>)}
           </div>
@@ -723,18 +795,25 @@ export default function App() {
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center p-8 text-center animate-fade-in">
               <div className="w-20 h-20 bg-white dark:bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl">
-                 <Icons.Cpu size={40} className="text-black" />
+                 {isImageGenMode ? <Icons.Sparkles size={40} className="text-purple-600 animate-pulse" /> : <Icons.Cpu size={40} className="text-black" />}
               </div>
               <h2 className="text-3xl font-black mb-2 tracking-tight">Welcome to SykoLLM</h2>
-              <p className="opacity-40 text-lg mb-12">Simple, natural, and powerful AI.</p>
+              <p className="opacity-40 text-lg mb-12">
+                {isImageGenMode ? "SykoLLM VISION: Image Generation Engine" : "Simple, natural, and powerful AI."}
+              </p>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
-                {[
+                {(isImageGenMode ? [
+                  "A futuristic city with neon lights, cyberpunk style",
+                  "A cute robot cat playing with a yarn ball",
+                  "Oil painting of a sunset over the ocean",
+                  "Minimalist logo design for a tech startup"
+                ] : [
                   "Hey, what's up?",
                   "Analyze an image for me", 
                   "Explain quantum physics simply",
                   "Tell me a joke"
-                ].map(s => (
+                ]).map(s => (
                   <button key={s} onClick={() => setInput(s)} className="p-5 rounded-2xl border border-black/10 dark:border-white/10 text-sm font-bold text-left hover:bg-black/5 dark:hover:bg-white/5 transition-all hover:scale-[1.02] shadow-sm">
                     "{s}"
                   </button>
@@ -759,6 +838,7 @@ export default function App() {
                           <div>PRO: {LIMITS.pro.text - usage.pro.text} Left</div>
                           <div>SUPER: {LIMITS.super.text - usage.super.text} Left</div>
                           <div>CODER: {LIMITS.coder.text - usage.coder.text} Left</div>
+                          <div>VISION: {LIMITS.vision.imageGen - usage.vision?.imageGen} Left</div>
                       </div>
                   </div>
               )}
@@ -788,12 +868,13 @@ export default function App() {
 
              {isImageGenMode && (
                 <div className="flex items-center justify-between bg-purple-500/10 text-purple-600 dark:text-purple-300 px-4 py-2 rounded-t-2xl text-[10px] font-black border border-b-0 border-purple-500/20">
-                   <div className="flex items-center gap-2"><Icons.Sparkles size={14} className="animate-pulse" /> SYKO VISION MODE ACTIVE</div>
-                   <button onClick={() => setIsImageGenMode(false)}><Icons.XCircle size={14} /></button>
+                   <div className="flex items-center gap-2"><Icons.Sparkles size={14} className="animate-pulse" /> SYKO VISION MODE ACTIVE (FLUX)</div>
+                   <button onClick={() => {setIsImageGenMode(false); setCurrentModel(MODELS[0].id);}}><Icons.XCircle size={14} /></button>
                 </div>
              )}
 
              <div className="relative group">
+                {/* Image Gen modunda dosya yüklemeyi devre dışı bırakabiliriz veya açık tutabiliriz, şimdilik açık. */}
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
                   const reader = new FileReader();
                   if (e.target.files?.[0]) {
@@ -802,13 +883,13 @@ export default function App() {
                   }
                 }} />
                 
-                <button onClick={() => fileInputRef.current?.click()} className="absolute left-3 bottom-3 p-2 rounded-xl text-black/50 dark:text-white/50 hover:bg-black/5 z-10 hover:text-black dark:hover:text-white transition-colors"><Icons.Plus size={18} /></button>
+                <button onClick={() => fileInputRef.current?.click()} disabled={isImageGenMode} className={`absolute left-3 bottom-3 p-2 rounded-xl transition-colors z-10 ${isImageGenMode ? 'opacity-20 cursor-not-allowed text-gray-500' : 'text-black/50 dark:text-white/50 hover:bg-black/5 hover:text-black dark:hover:text-white'}`}><Icons.Plus size={18} /></button>
                 
                 <div className="absolute left-12 bottom-3 z-20" ref={menuRef}>
                     <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 rounded-xl hover:bg-black/5 text-black/50 dark:text-white/50 transition-colors hover:text-black dark:hover:text-white"><Icons.MoreHorizontal size={18} /></button>
                     {isMenuOpen && (
                         <div className="absolute bottom-full mb-3 left-0 w-64 bg-white dark:bg-syko-gray border border-black/10 dark:border-white/10 rounded-2xl shadow-2xl p-1 overflow-hidden animate-slide-up origin-bottom-left">
-                            <button onClick={() => {setIsImageGenMode(true); setIsMenuOpen(false);}} className="w-full text-left p-4 hover:bg-black/5 rounded-xl flex items-center gap-3 transition-all">
+                            <button onClick={() => {setCurrentModel('syko-vision'); setIsMenuOpen(false);}} className="w-full text-left p-4 hover:bg-black/5 rounded-xl flex items-center gap-3 transition-all">
                                 <div className="p-2 bg-purple-500/20 text-purple-600 rounded-xl"><Icons.Image size={16} /></div>
                                 <div className="flex flex-col"><span className="text-xs font-black uppercase">Syko Vision</span><span className="text-[10px] opacity-40">Creative Engine</span></div>
                             </button>
@@ -822,7 +903,7 @@ export default function App() {
 
                  <button onClick={toggleVoiceInput} className={`absolute right-14 bottom-3 p-2 rounded-xl transition-all z-20 ${isListening ? 'bg-red-500/10 text-red-500 animate-pulse' : 'text-black/30 dark:text-white/30 hover:text-black dark:hover:text-white'}`}><Icons.Mic size={18} /></button>
                 
-                <button onClick={() => isTyping ? abortControllerRef.current?.abort() : handleSubmit()} disabled={!input.trim() && selectedImages.length === 0 && !isTyping} className={`absolute right-3 bottom-3 p-2 rounded-xl text-white transition-all shadow-md ${isTyping ? 'bg-black dark:bg-white dark:text-black' : isImageGenMode ? 'bg-purple-600' : 'bg-black dark:bg-white dark:text-black disabled:opacity-0 disabled:scale-90'}`}>
+                <button onClick={() => isTyping ? abortControllerRef.current?.abort() : handleSubmit()} disabled={!input.trim() && selectedImages.length === 0 && !isTyping} className={`absolute right-3 bottom-3 p-2 rounded-xl text-white transition-all shadow-md ${isTyping ? 'bg-black dark:bg-white dark:text-black' : isImageGenMode ? 'bg-purple-600 hover:bg-purple-500' : 'bg-black dark:bg-white dark:text-black disabled:opacity-0 disabled:scale-90'}`}>
                   {isTyping ? <Icons.Square size={18} fill="currentColor" /> : isImageGenMode ? <Icons.Sparkles size={18} /> : <Icons.Send size={18} />}
                 </button>
              </div>

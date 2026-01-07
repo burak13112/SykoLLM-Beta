@@ -45,4 +45,5 @@ export interface DailyUsage {
   pro: ModelUsage;
   super: ModelUsage;
   coder: ModelUsage;
+  vision: ModelUsage;
 }
