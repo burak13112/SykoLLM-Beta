@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
       'process.env.API_KEY1': JSON.stringify(env.API_KEY1 || ""),
       'process.env.API_KEY2': JSON.stringify(env.API_KEY2 || ""),
       'process.env.API_KEY3': JSON.stringify(env.API_KEY3 || ""),
+      'process.env.API_KEY4': JSON.stringify(env.API_KEY4 || ""), // Vision Key
       // Google Client ID Güncellendi
       'process.env.GOOGLE_CLIENT_ID': JSON.stringify(env.GOOGLE_CLIENT_ID || "758297956052-i36trssmqp1rv2d3f2oradjl0rmm77op.apps.googleusercontent.com")
     }

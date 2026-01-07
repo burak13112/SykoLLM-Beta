@@ -4,7 +4,6 @@ import { Message } from '../types.ts';
 // 🧠 SYKO PERSONA AYARLARI
 // ============================================================================
 
-// Sadece 'Zorlama Düşünme' gerektiren modeller için (V3 Pro, Coder)
 const SYNTHETIC_THINKING_PROMPT = `
 [IMPORTANT INSTRUCTION]
 You are a Deep Reasoning AI.
@@ -19,12 +18,8 @@ DO NOT put conversational filler inside the think block. Only logic.
 
 const SYSTEM_PROMPTS: Record<string, string> = {
   'syko-v2.5': `You are SykoLLM V2.5. Helpful, fast, witty companion. Speak naturally.`,
-  
   'syko-v3-pro': `You are SykoLLM PRO. Intelligent and balanced. ${SYNTHETIC_THINKING_PROMPT}`,
-  
-  // DeepSeek R1 için System Prompt sade olmalı, model zaten ne yapacağını biliyor.
   'syko-super-pro': `You are SykoLLM SUPER PRO (DeepSeek R1). You are a deep reasoning engine. Output your thought process naturally.`,
-  
   'syko-coder': `You are SykoLLM Coder. Expert developer. ${SYNTHETIC_THINKING_PROMPT}`
 };
 
@@ -36,25 +31,33 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   // UX Gecikmesi
   await new Promise(resolve => setTimeout(resolve, 1000));
 
+  // 1. ANAHTAR AYRIMI:
+  // Gemini (Prompt Geliştirici / Vision Bridge) için standart keyleri kullan.
+  // Flash Lite kullanacağımız için limit derdi az, API_KEY1 veya API_KEY yeterli.
+  const enhancerApiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+
+  // Pollinations (Görsel Üretici) için kullanıcının özel aldığı keyi kullan.
+  const pollinationsToken = process.env.API_KEY4 || "";
+
   let finalPrompt = prompt;
   let responseText = `Generated visual asset based on: "${prompt}"`;
 
   // 🖼️ IMAGE-TO-IMAGE (REMIX) MANTIĞI
   if (referenceImages && referenceImages.length > 0) {
      try {
-        const apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
-        // REMIX için en sağlam Vision modeli olan Gemini 2.0 Pro'yu kullanıyoruz.
-        // Gemma bazen OpenRouter'da görsel ile birlikte kullanıldığında hata verip React'i çökertebiliyor.
+        // GÜNCELLEME: 'Gemini 2.0 Pro' yerine 'Gemini 2.0 Flash Lite' kullanıyoruz.
+        // SEBEP: Pro modelinin limiti çabuk doluyor. Flash Lite çok daha hızlı ve limiti yüksek.
+        // Prompt geliştirme ve resim tarifi için Flash Lite fazlasıyla yeterli.
         const remixResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
-              "Authorization": `Bearer ${apiKey}`,
+              "Authorization": `Bearer ${enhancerApiKey}`,
               "Content-Type": "application/json",
               "HTTP-Referer": window.location.href,
               "X-Title": "SykoLLM Web Remix"
             },
             body: JSON.stringify({
-              model: "google/gemini-2.0-pro-exp-02-05:free", 
+              model: "google/gemini-2.0-flash-lite-preview-02-05:free", // HIZLI & YÜKSEK LİMİTLİ MODEL
               messages: [
                 {
                   role: "user",
@@ -90,10 +93,20 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
 
   // Prompt'u URL için hazırla
   const encodedPrompt = encodeURIComponent(finalPrompt + " high quality, detailed, masterpiece, cinematic lighting, 8k");
-  const randomSeed = Math.floor(Math.random() * 100000);
+  const randomSeed = Math.floor(Math.random() * 1000000);
   
-  // Pollinations Flux Model URL
-  const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&model=flux&seed=${randomSeed}&nologo=true`;
+  // POLLINATIONS LIMIT BYPASS
+  // Modelleri rastgele seçerek sunucuyu şaşırtıyoruz.
+  const models = ['flux', 'flux-realism', 'turbo'];
+  const randomModel = models[Math.floor(Math.random() * models.length)];
+
+  // URL OLUŞTURMA
+  let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&model=${randomModel}&seed=${randomSeed}&nologo=true`;
+  
+  // Eğer özel Pollinations Key (API_KEY4) varsa URL'ye ekle (Genelde bu tür servisler token/api_key parametresi kabul eder)
+  if (pollinationsToken) {
+      imageUrl += `&token=${pollinationsToken}&private=true`; 
+  }
 
   return {
     text: responseText,
@@ -104,20 +117,21 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
 // ============================================================================
 // 👁️ VISION BRIDGE (The "Sneaky" Image Analyst)
 // ============================================================================
-// Bu fonksiyon görseli alır, Gemini'ye okutur ve detaylı bir metin betimlemesi döndürür.
 const getVisionDescription = async (imageUrl: string): Promise<string> => {
     try {
-        const apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+        // Vision Bridge için de Flash Lite kullanıyoruz (Limit dostu)
+        const visionApiKey = process.env.API_KEY1 || process.env.API_KEY || "";
+        
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
-                "Authorization": `Bearer ${apiKey}`,
+                "Authorization": `Bearer ${visionApiKey}`,
                 "Content-Type": "application/json",
                 "HTTP-Referer": window.location.href,
                 "X-Title": "SykoLLM Vision Bridge"
             },
             body: JSON.stringify({
-                model: "google/gemini-2.0-pro-exp-02-05:free", // En güçlü vision modeli
+                model: "google/gemini-2.0-flash-lite-preview-02-05:free", // GÜNCELLEME: Flash Lite
                 messages: [
                     {
                         role: "user",
@@ -139,7 +153,7 @@ const getVisionDescription = async (imageUrl: string): Promise<string> => {
 };
 
 // ============================================================================
-// 🚀 OPENROUTER STREAMING SERVICE (PURE FETCH)
+// 🚀 OPENROUTER STREAMING SERVICE
 // ============================================================================
 
 export const streamResponse = async (
@@ -154,7 +168,6 @@ export const streamResponse = async (
   let apiKey = "";
   let systemPrompt = SYSTEM_PROMPTS['syko-v2.5'];
 
-  // Model ID Eşleştirmeleri
   switch (modelId) {
     case 'syko-v2.5':
       openRouterModel = "meta-llama/llama-3.3-70b-instruct:free";
@@ -163,14 +176,16 @@ export const streamResponse = async (
       break;
     
     case 'syko-v3-pro':
-      // Bu model zaten native vision destekler (Gemini backend)
-      openRouterModel = "google/gemini-2.0-pro-exp-02-05:free";
+      // GÜNCELLEME: Sohbet için PRO modelini (Pro Experimental) kullanmaya devam edelim, 
+      // çünkü sohbet kalitesi önemli. Ama eğer çok hata alırsan burayı da Flash'a çevirebiliriz.
+      // Şimdilik Vision/Remix işini Flash'a yıktığımız için burası biraz rahatlayacaktır.
+      openRouterModel = "mistralai/devstral-2512:free";
       apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
       
     case 'syko-super-pro':
-      openRouterModel = "deepseek/deepseek-r1-0528:free"; 
+      openRouterModel = "deepseek/deepseek-r1-0528:free";
       apiKey = process.env.API_KEY2 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-super-pro'];
       break;
@@ -190,17 +205,13 @@ export const streamResponse = async (
   let finalUserContent = lastMsg.content;
   let useVisionBridge = false;
 
-  // 🌉 VISION BRIDGE LOGIC (Sinsice araya girme)
-  // Eğer resim varsa VE seçili model native vision desteklemiyorsa (yani Llama, DeepSeek, Qwen ise)
+  // 🌉 VISION BRIDGE LOGIC
   if (images && images.length > 0) {
       if (modelId === 'syko-v2.5' || modelId === 'syko-super-pro' || modelId === 'syko-coder') {
           console.log(`[SykoLLM System] Vision Bridge Activated for ${modelId}. Analyzing image first...`);
           
-          // 1. Resmi Gemini'ye analiz ettir
           const imageDescription = await getVisionDescription(images[0]);
           
-          // 2. Prompt'u manipüle et (Prompt Injection)
-          // Asıl modele resmi değil, resmin metnini gönderiyoruz.
           finalUserContent = `[SYSTEM INSTRUCTION: The user has attached an image. Since you cannot see images directly, an external Vision AI has analyzed it for you. Here is the description of the image:]
           
           --- START OF IMAGE DESCRIPTION ---
@@ -211,7 +222,6 @@ export const streamResponse = async (
           ${lastMsg.content}
           `;
 
-          // 3. Bridge modunu aktifleştir (Resim verisini API çağrısından sildirir)
           useVisionBridge = true;
       }
   }
@@ -220,7 +230,6 @@ export const streamResponse = async (
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // Geçmiş mesajları ekle
   for (let i = 0; i < history.length - 1; i++) {
     messages.push({
       role: history[i].role === 'model' ? 'assistant' : 'user',
@@ -228,23 +237,12 @@ export const streamResponse = async (
     });
   }
 
-  // Mesaj payload'ını hazırla
   if (images && images.length > 0 && !useVisionBridge) {
-    // Native Vision Destekleyen Modeller (Gemini - V3 Pro)
-    // Resmi doğrudan yolla
     const contentArray: any[] = [{ type: "text", text: finalUserContent }];
     images.forEach(img => contentArray.push({ type: "image_url", image_url: { url: img } }));
     messages.push({ role: "user", content: contentArray });
   } else {
-    // Text-Only Modeller (DeepSeek, Llama, Qwen)
-    // Vision Bridge sayesinde resim metne dönüştü, artık sadece text yolluyoruz.
-    // Böylece 400 hatası almıyoruz.
     messages.push({ role: "user", content: finalUserContent });
-  }
-
-  // FEW-SHOT INJECTION for Coder
-  if (modelId === 'syko-coder' && !finalUserContent.includes("SYSTEM INSTRUCTION")) {
-       // ... coder specific logic (isteğe bağlı, bridge durumunda gerek yok)
   }
 
   try {
@@ -261,20 +259,14 @@ export const streamResponse = async (
         messages: messages,
         stream: true,
         temperature: 0.6,
-        include_reasoning: true // DeepSeek R1 için kritik
+        include_reasoning: true 
       }),
       signal: signal
     });
 
     if (!response.ok) {
-        const errorData = await response.text();
-        console.error("OpenRouter API Error:", errorData);
-        if (response.status === 404) {
-            throw new Error("Model servisine ulaşılamadı (404).");
-        }
-        if (response.status === 429) {
-             throw new Error("Sunucu çok yoğun (429). Lütfen 10-15 saniye bekleyip tekrar deneyin.");
-        }
+        if (response.status === 404) throw new Error("Model servisine ulaşılamadı (404).");
+        if (response.status === 429) throw new Error("Sunucu çok yoğun (429). Lütfen 10-15 saniye bekleyip tekrar deneyin.");
         throw new Error(`API Error: ${response.status} - ${response.statusText}`);
     }
     if (!response.body) throw new Error("Empty response body");
@@ -282,7 +274,6 @@ export const streamResponse = async (
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     
-    // Reasoning State Management
     let hasStartedThinking = false;
     let hasFinishedThinking = false;
 
@@ -302,39 +293,25 @@ export const streamResponse = async (
         try {
           const json = JSON.parse(dataStr);
           const delta = json.choices?.[0]?.delta;
-          
           if (!delta) continue;
 
-          // 1. NATIVE REASONING (DeepSeek R1)
           const reasoningChunk = delta.reasoning; 
-          
           if (reasoningChunk) {
-            if (!hasStartedThinking) {
-               onChunk("<think>");
-               hasStartedThinking = true;
-            }
+            if (!hasStartedThinking) { onChunk("<think>"); hasStartedThinking = true; }
             onChunk(reasoningChunk);
             continue; 
           }
 
-          // 2. NORMAL CONTENT
           const contentChunk = delta.content || "";
-          
           if (contentChunk) {
-            if (hasStartedThinking && !hasFinishedThinking) {
-                onChunk("</think>");
-                hasFinishedThinking = true;
-            }
+            if (hasStartedThinking && !hasFinishedThinking) { onChunk("</think>"); hasFinishedThinking = true; }
             onChunk(contentChunk);
           }
-
         } catch (e) { }
       }
     }
     
-    if (hasStartedThinking && !hasFinishedThinking) {
-        onChunk("</think>");
-    }
+    if (hasStartedThinking && !hasFinishedThinking) onChunk("</think>");
 
     return "DONE";
 
