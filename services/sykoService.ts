@@ -113,7 +113,7 @@ const getVisionDescription = async (imageUrl: string): Promise<string> => {
                 "X-Title": "SykoLLM Vision Bridge"
             },
             body: JSON.stringify({
-                model: "google/gemini-2.0-pro-exp-02-05:free", // En güçlü vision modeli
+                model: "google/gemma-3-27b-it:free", // En güçlü vision modeli
                 messages: [
                     {
                         role: "user",
@@ -160,7 +160,7 @@ export const streamResponse = async (
     
     case 'syko-v3-pro':
       // Bu model zaten native vision destekler (Gemini backend)
-      openRouterModel = "google/gemini-2.0-pro-exp-02-05:free";
+      openRouterModel = "google/gemma-3-27b-it:free";
       apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
