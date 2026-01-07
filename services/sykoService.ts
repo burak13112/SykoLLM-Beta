@@ -33,7 +33,7 @@ const extractBase64Data = (dataUrl: string) => {
 };
 
 // ============================================================================
-// 🎨 SYKO VISION (GEMINI 2.5 FLASH IMAGE POWERED)
+// 🎨 SYKO VISION (IMAGEN 3 POWERED)
 // ============================================================================
 export const generateSykoImage = async (modelId: string, prompt: string, referenceImages?: string[]): Promise<{ text: string, images: string[] }> => {
   
@@ -49,17 +49,17 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
 
   let finalPrompt = prompt;
   
-  // 1. PROMPT GÜÇLENDİRME (Prompt Engineering)
-  // Kullanıcının kısa isteğini daha sanatsal hale getiriyoruz.
+  // 1. PROMPT GÜÇLENDİRME (Prompt Engineering) - Gemini 1.5 Flash (Stabil)
   try {
-      const enhancementResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+      // 404 hatasını çözmek için 'gemini-2.0-flash' yerine 'gemini-1.5-flash' kullanıyoruz.
+      const enhancementResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
               contents: [{
                   parts: [{
                       text: `You are an expert AI Art Director. 
-                      Rewrite this user prompt into a concise but highly descriptive prompt suitable for an AI image generator.
+                      Rewrite this user prompt into a concise but highly descriptive prompt suitable for an AI image generator (Imagen 3).
                       Focus on subject, style, lighting, and composition.
                       USER PROMPT: "${prompt}"
                       Output ONLY the raw English prompt. No introductions.`
@@ -81,64 +81,44 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
       console.warn("Prompt enhancement failed, using raw prompt.", e);
   }
 
-  // 2. GEMINI 2.5 FLASH IMAGE İLE GÖRSEL ÜRETİMİ
+  // 2. IMAGEN 3 İLE GÖRSEL ÜRETİMİ (Stabil)
+  // Gemini 2.5 Flash Image 429 verdiği için Imagen 3.0 kullanıyoruz.
   try {
-      // Model: gemini-2.5-flash-image
-      const parts: any[] = [];
-      
-      // Eğer referans resim varsa ekle (Image Editing / Variation için)
-      if (referenceImages && referenceImages.length > 0) {
-          const { mimeType, data } = extractBase64Data(referenceImages[0]);
-          parts.push({ inline_data: { mime_type: mimeType, data: data } });
-      }
-      
-      // Promptu ekle
-      parts.push({ text: finalPrompt });
-
-      const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${geminiKey}`, {
+      // Not: Imagen API yapısı Gemini generateContent'ten farklıdır.
+      const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:generateImages?key=${geminiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-              contents: [{ parts: parts }]
+              prompt: finalPrompt,
+              number_of_images: 1,
+              // referenceImages desteği Imagen REST API'da farklı olduğu için şimdilik sadece Text-to-Image
           })
       });
 
-      if (!geminiResponse.ok) {
-          const errText = await geminiResponse.text();
-          console.error("Gemini Image Gen API Error:", errText);
-          throw new Error(`Görsel üretilemedi: ${geminiResponse.statusText}`);
-      }
-
-      const data = await geminiResponse.json();
-      
-      // Gemini 2.5 Flash Image, resmi 'inlineData' olarak döndürür.
-      // Response içindeki parts dizisini tarayıp resmi bulmamız lazım.
-      const candidate = data.candidates?.[0];
-      if (!candidate || !candidate.content || !candidate.content.parts) {
-           throw new Error("API boş yanıt döndü.");
-      }
-
-      let generatedImageUrl = "";
-      let generatedText = "";
-
-      for (const part of candidate.content.parts) {
-          if (part.inlineData) {
-              const mimeType = part.inlineData.mimeType;
-              const base64Data = part.inlineData.data;
-              generatedImageUrl = `data:${mimeType};base64,${base64Data}`;
-          } else if (part.text) {
-              generatedText += part.text;
+      if (!imagenResponse.ok) {
+          const errText = await imagenResponse.text();
+          console.error("Imagen API Error:", errText);
+          
+          // Hata mesajını daha anlaşılır yap
+          if (errText.includes("429") || imagenResponse.status === 429) {
+             throw new Error("Google Resim Üretme Kotası Doldu (429). Lütfen daha sonra deneyin.");
           }
+          throw new Error(`Görsel üretilemedi (${imagenResponse.status}): ${imagenResponse.statusText}`);
       }
 
-      if (generatedImageUrl) {
+      const data = await imagenResponse.json();
+      
+      // Imagen Base64 döner
+      const imageBytes = data.generatedImages?.[0]?.image?.imageBytes;
+
+      if (imageBytes) {
+          const generatedImageUrl = `data:image/jpeg;base64,${imageBytes}`;
           return {
-              text: `**Gemini 2.5 Flash Image** tarafından oluşturuldu.\n\n*Prompt: ${finalPrompt}*\n${generatedText}`,
+              text: `**Syko Vision (Imagen 3)** tarafından oluşturuldu.\n\n*Prompt: ${finalPrompt}*`,
               images: [generatedImageUrl]
           };
       } else {
-          // Bazen model güvenlik gerekçesiyle veya başka bir sebeple sadece metin dönebilir.
-          throw new Error("Model görsel yerine sadece metin döndürdü: " + (generatedText || "Bilinmeyen hata"));
+          throw new Error("Model geçerli bir görsel verisi döndürmedi.");
       }
 
   } catch (error: any) {
@@ -159,9 +139,9 @@ const getVisionDescription = async (imageUrl: string): Promise<string> => {
 
         const { mimeType, data } = extractBase64Data(imageUrl);
 
-        // Doğrudan Google API'sine istek (OpenRouter değil)
-        // Gemini 2.0 Flash ücretsiz ve çok hızlıdır.
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+        // 404 hatasını çözmek için 'gemini-2.0-flash' yerine 'gemini-1.5-flash' kullanıyoruz.
+        // Gemini 1.5 Flash Vision konusunda çok yetenekli ve stabildir.
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
