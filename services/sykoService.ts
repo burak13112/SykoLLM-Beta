@@ -32,22 +32,17 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   await new Promise(resolve => setTimeout(resolve, 1000));
 
   // 1. ANAHTAR AYRIMI:
-  // Gemini (Prompt Geliştirici / Vision Bridge) için standart keyleri kullan.
-  // Flash Lite kullanacağımız için limit derdi az, API_KEY1 veya API_KEY yeterli.
   const enhancerApiKey = process.env.API_KEY1 || process.env.API_KEY || "";
-
-  // Pollinations (Görsel Üretici) için kullanıcının özel aldığı keyi kullan.
   const pollinationsToken = process.env.API_KEY4 || "";
 
   let finalPrompt = prompt;
   let responseText = `Generated visual asset based on: "${prompt}"`;
 
   // 🖼️ IMAGE-TO-IMAGE (REMIX) MANTIĞI
+  // Burası görsel ÜRETMEZ, sadece senin yüklediğin resmi anali edip yeni prompt yazar.
+  // Üretimi aşağıda Pollinations yapacak.
   if (referenceImages && referenceImages.length > 0) {
      try {
-        // GÜNCELLEME: 'Gemini 2.0 Pro' yerine 'Gemini 2.0 Flash Lite' kullanıyoruz.
-        // SEBEP: Pro modelinin limiti çabuk doluyor. Flash Lite çok daha hızlı ve limiti yüksek.
-        // Prompt geliştirme ve resim tarifi için Flash Lite fazlasıyla yeterli.
         const remixResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -57,7 +52,7 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
               "X-Title": "SykoLLM Web Remix"
             },
             body: JSON.stringify({
-              model: "google/gemini-2.0-flash-lite-preview-02-05:free", // HIZLI & YÜKSEK LİMİTLİ MODEL
+              model: "google/gemini-2.0-flash-lite-preview-02-05:free",
               messages: [
                 {
                   role: "user",
@@ -83,8 +78,6 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
                 finalPrompt = enhancedPrompt;
                 responseText = `Remixed visual asset based on reference and: "${prompt}"`;
             }
-        } else {
-            console.warn("Remix API returned error:", await remixResponse.text());
         }
      } catch (e) {
          console.warn("Remix enhancement failed, falling back to raw prompt.", e);
@@ -92,18 +85,20 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   }
 
   // Prompt'u URL için hazırla
-  const encodedPrompt = encodeURIComponent(finalPrompt + " high quality, detailed, masterpiece, cinematic lighting, 8k");
+  const encodedPrompt = encodeURIComponent(finalPrompt + " high quality, detailed, masterpiece, 8k");
   const randomSeed = Math.floor(Math.random() * 1000000);
   
-  // POLLINATIONS LIMIT BYPASS
-  // Modelleri rastgele seçerek sunucuyu şaşırtıyoruz.
-  const models = ['flux', 'flux-realism', 'turbo'];
+  // POLLINATIONS MODELLERİ (Ekran Görüntüsündekiler)
+  // flux -> Flux Schnell
+  // zimage -> Z-Image Turbo
+  // turbo -> SDXL Turbo
+  const models = ['flux', 'zimage', 'turbo'];
   const randomModel = models[Math.floor(Math.random() * models.length)];
 
   // URL OLUŞTURMA
   let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&model=${randomModel}&seed=${randomSeed}&nologo=true`;
   
-  // Eğer özel Pollinations Key (API_KEY4) varsa URL'ye ekle (Genelde bu tür servisler token/api_key parametresi kabul eder)
+  // Eğer özel Pollinations Key (API_KEY4) varsa URL'ye ekle
   if (pollinationsToken) {
       imageUrl += `&token=${pollinationsToken}&private=true`; 
   }
@@ -119,7 +114,6 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
 // ============================================================================
 const getVisionDescription = async (imageUrl: string): Promise<string> => {
     try {
-        // Vision Bridge için de Flash Lite kullanıyoruz (Limit dostu)
         const visionApiKey = process.env.API_KEY1 || process.env.API_KEY || "";
         
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -131,7 +125,7 @@ const getVisionDescription = async (imageUrl: string): Promise<string> => {
                 "X-Title": "SykoLLM Vision Bridge"
             },
             body: JSON.stringify({
-                model: "google/gemini-2.0-flash-lite-preview-02-05:free", // GÜNCELLEME: Flash Lite
+                model: "google/gemini-2.0-flash-lite-preview-02-05:free",
                 messages: [
                     {
                         role: "user",
@@ -176,9 +170,6 @@ export const streamResponse = async (
       break;
     
     case 'syko-v3-pro':
-      // GÜNCELLEME: Sohbet için PRO modelini (Pro Experimental) kullanmaya devam edelim, 
-      // çünkü sohbet kalitesi önemli. Ama eğer çok hata alırsan burayı da Flash'a çevirebiliriz.
-      // Şimdilik Vision/Remix işini Flash'a yıktığımız için burası biraz rahatlayacaktır.
       openRouterModel = "mistralai/devstral-2512:free";
       apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
