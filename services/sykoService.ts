@@ -33,7 +33,7 @@ const extractBase64Data = (dataUrl: string) => {
 };
 
 // ============================================================================
-// 🎨 SYKO VISION (GOOGLE IMAGEN 3 POWERED)
+// 🎨 SYKO VISION (GEMINI 2.5 FLASH IMAGE POWERED)
 // ============================================================================
 export const generateSykoImage = async (modelId: string, prompt: string, referenceImages?: string[]): Promise<{ text: string, images: string[] }> => {
   
@@ -48,10 +48,9 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   }
 
   let finalPrompt = prompt;
-  let responseText = `Generated with Google Imagen 3 based on: "${prompt}"`;
-
-  // 1. GEMINI İLE PROMPT GÜÇLENDİRME (Prompt Engineering)
-  // Kullanıcının kısa isteğini Imagen 3'ün anlayacağı süper detaylı hale getiriyoruz.
+  
+  // 1. PROMPT GÜÇLENDİRME (Prompt Engineering)
+  // Kullanıcının kısa isteğini daha sanatsal hale getiriyoruz.
   try {
       const enhancementResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
           method: "POST",
@@ -60,10 +59,10 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
               contents: [{
                   parts: [{
                       text: `You are an expert AI Art Director. 
-                      Rewrite this user prompt into a highly detailed, descriptive prompt suitable for the 'Imagen 3' image generation model.
-                      Include details about lighting, style (photorealistic, cinematic, oil painting, etc.), composition, and colors.
+                      Rewrite this user prompt into a concise but highly descriptive prompt suitable for an AI image generator.
+                      Focus on subject, style, lighting, and composition.
                       USER PROMPT: "${prompt}"
-                      Output ONLY the raw English prompt. Do not add introductions.`
+                      Output ONLY the raw English prompt. No introductions.`
                   }]
               }]
           })
@@ -82,49 +81,64 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
       console.warn("Prompt enhancement failed, using raw prompt.", e);
   }
 
-  // 2. GOOGLE IMAGEN 3 İLE GÖRSEL ÜRETİMİ
-  // Pollinations yok. Direkt Google sunucularına istek atıyoruz.
+  // 2. GEMINI 2.5 FLASH IMAGE İLE GÖRSEL ÜRETİMİ
   try {
-      // Imagen 3 endpoint -> VERSİYON GÜNCELLENDİ: 002
-      const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${geminiKey}`, {
+      // Model: gemini-2.5-flash-image
+      const parts: any[] = [];
+      
+      // Eğer referans resim varsa ekle (Image Editing / Variation için)
+      if (referenceImages && referenceImages.length > 0) {
+          const { mimeType, data } = extractBase64Data(referenceImages[0]);
+          parts.push({ inline_data: { mime_type: mimeType, data: data } });
+      }
+      
+      // Promptu ekle
+      parts.push({ text: finalPrompt });
+
+      const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${geminiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-              instances: [
-                  { prompt: finalPrompt }
-              ],
-              parameters: {
-                  sampleCount: 1,
-                  aspectRatio: "1:1" // Kare format, isteğe göre değiştirilebilir
-              }
+              contents: [{ parts: parts }]
           })
       });
 
-      if (!imagenResponse.ok) {
-          const errText = await imagenResponse.text();
-          console.error("Imagen API Error:", errText);
-          
-          // Eğer 404 ise muhtemelen API key Imagen 3 için yetkili değildir veya model adı yanlıştır.
-          if (imagenResponse.status === 404) {
-              throw new Error("Imagen 3.0 (002) modeli bu API anahtarında bulunamadı. Lütfen Google AI Studio'da doğru modele erişiminiz olduğundan emin olun.");
-          }
-          throw new Error(`Google Image Gen Error: ${imagenResponse.statusText}`);
+      if (!geminiResponse.ok) {
+          const errText = await geminiResponse.text();
+          console.error("Gemini Image Gen API Error:", errText);
+          throw new Error(`Görsel üretilemedi: ${geminiResponse.statusText}`);
       }
 
-      const data = await imagenResponse.json();
+      const data = await geminiResponse.json();
       
-      // Imagen Base64 döner. Bunu Data URL'e çevirmemiz lazım.
-      if (data.predictions && data.predictions.length > 0) {
-          const base64Image = data.predictions[0].bytesBase64Encoded;
-          const mimeType = data.predictions[0].mimeType || "image/png";
-          const imageUrl = `data:${mimeType};base64,${base64Image}`;
-          
+      // Gemini 2.5 Flash Image, resmi 'inlineData' olarak döndürür.
+      // Response içindeki parts dizisini tarayıp resmi bulmamız lazım.
+      const candidate = data.candidates?.[0];
+      if (!candidate || !candidate.content || !candidate.content.parts) {
+           throw new Error("API boş yanıt döndü.");
+      }
+
+      let generatedImageUrl = "";
+      let generatedText = "";
+
+      for (const part of candidate.content.parts) {
+          if (part.inlineData) {
+              const mimeType = part.inlineData.mimeType;
+              const base64Data = part.inlineData.data;
+              generatedImageUrl = `data:${mimeType};base64,${base64Data}`;
+          } else if (part.text) {
+              generatedText += part.text;
+          }
+      }
+
+      if (generatedImageUrl) {
           return {
-              text: `**Imagen 3.0** tarafından oluşturuldu.\n\n*Prompt: ${finalPrompt}*`,
-              images: [imageUrl]
+              text: `**Gemini 2.5 Flash Image** tarafından oluşturuldu.\n\n*Prompt: ${finalPrompt}*\n${generatedText}`,
+              images: [generatedImageUrl]
           };
       } else {
-          throw new Error("Görsel oluşturulamadı (Boş yanıt).");
+          // Bazen model güvenlik gerekçesiyle veya başka bir sebeple sadece metin dönebilir.
+          throw new Error("Model görsel yerine sadece metin döndürdü: " + (generatedText || "Bilinmeyen hata"));
       }
 
   } catch (error: any) {
