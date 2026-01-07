@@ -52,7 +52,7 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
               "X-Title": "SykoLLM Web Remix"
             },
             body: JSON.stringify({
-              model: "google/gemini-2.0-pro-exp-02-05:free",
+              model: "mistralai/devstral-2512:free",
               messages: [
                 {
                   role: "user",
@@ -160,7 +160,7 @@ export const streamResponse = async (
     
     case 'syko-v3-pro':
       // Bu model zaten native vision destekler (Gemini backend)
-      openRouterModel = "google/gemma-3-27b-it:free";
+      openRouterModel = "mistralai/devstral-2512:free";
       apiKey = process.env.API_KEY1 || process.env.API_KEY || "";
       systemPrompt = SYSTEM_PROMPTS['syko-v3-pro'];
       break;
