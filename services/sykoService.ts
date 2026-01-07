@@ -85,7 +85,7 @@ export const generateSykoImage = async (modelId: string, prompt: string, referen
   // Gemini 2.5 Flash Image 429 verdiği için Imagen 3.0 kullanıyoruz.
   try {
       // Not: Imagen API yapısı Gemini generateContent'ten farklıdır.
-      const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:generateImages?key=${geminiKey}`, {
+      const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:generateImages?key=${geminiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
